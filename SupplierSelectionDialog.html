@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 15px; }
+    .product { background: #f0f0f0; padding: 8px; margin: 5px 0; border-radius: 4px; }
+    .supplier { margin: 8px 0; }
+    .supplier input[type="checkbox"] { margin-right: 8px; }
+    .article-input { width: 100%; margin-top: 5px; padding: 4px; }
+    .buttons { margin-top: 20px; text-align: right; }
+    button { padding: 8px 16px; margin-left: 8px; cursor: pointer; }
+    .primary { background: #4285f4; color: white; border: none; }
+  </style>
+</head>
+<body>
+  <h3>Выбор поставщиков для парсинга</h3>
+  
+  <div id="suppliers">
+    <? for (var i = 0; i < suppliers.length; i++) { ?>
+      <div class="supplier">
+        <input type="checkbox" id="sup_<?= suppliers[i].key ?>" value="<?= suppliers[i].key ?>">
+        <label for="sup_<?= suppliers[i].key ?>"><?= suppliers[i].name ?></label>
+      </div>
+    <? } ?>
+  </div>
+  
+  <h4>Артикулы для парсинга:</h4>
+  
+  <div id="products">
+    <? for (var i = 0; i < products.length; i++) { ?>
+      <div class="product">
+        <strong><?= products[i].article ?></strong> - <?= products[i].name ?>
+        <input type="text" 
+               class="article-input" 
+               data-product="<?= products[i].article ?>"
+               placeholder="Артикулы через запятую (необязательно)">
+      </div>
+    <? } ?>
+  </div>
+  
+  <div class="buttons">
+    <button onclick="google.script.host.close()">Отмена</button>
+    <button class="primary" onclick="startParsing()">Начать парсинг</button>
+  </div>
+  
+  <script>
+    function startParsing() {
+      const selectedSuppliers = [];
+      const articlesMap = {};
+      
+      document.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        selectedSuppliers.push(cb.value);
+      });
+      
+      if (selectedSuppliers.length === 0) {
+        alert('Выберите хотя бы одного поставщика');
+        return;
+      }
+      
+      document.querySelectorAll('.article-input').forEach(input => {
+        const productArticle = input.dataset.product;
+        const supplierArticles = input.value.trim() || productArticle;
+        articlesMap[productArticle] = supplierArticles;
+      });
+      
+      google.script.run
+        .withSuccessHandler(() => {
+          alert('Парсинг запущен');
+          google.script.host.close();
+        })
+        .withFailureHandler(err => alert('Ошибка: ' + err))
+        .runSupplierParsingWrapper(selectedSuppliers, articlesMap);
+    }
+  </script>
+</body>
+</html>

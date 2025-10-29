@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+ <base target="_top">
+ <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
+  
+    .original-block {
+      background: #e3f2fd;
+      padding: 15px 20px;
+      border-bottom: 2px solid #2196f3;
+      position: sticky;
+      top: 0;
+      z-index: 90;
+    }
+  
+   .original-block h4 {
+     margin: 0 0 10px 0;
+     color: #1976d2;
+     font-size: 14px;
+   }
+  
+   .content {
+     padding: 20px;
+     margin-bottom: 80px;
+   }
+  
+   .source-block {
+     background: white;
+     margin-bottom: 20px;
+     border-radius: 8px;
+     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+     overflow: hidden;
+   }
+  
+   .source-header {
+     padding: 15px 20px;
+     background: #f8f9fa;
+     border-bottom: 1px solid #eee;
+     display: flex;
+     justify-content: space-between;
+     align-items: center;
+   }
+  
+   .source-title {
+     font-weight: bold;
+     color: #333;
+   }
+  
+   .select-all-source {
+     font-size: 12px;
+   }
+  
+    .images-grid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);  /* Фиксированно 10 колонок */
+      gap: 6px;
+      padding: 15px;
+    }
+
+    .original-grid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);  /* Фиксированно 10 колонок */
+      gap: 6px;
+    }
+  
+   .image-item {
+     text-align: center;
+     border: 2px solid transparent;
+     border-radius: 6px;
+     padding: 5px;
+     transition: border-color 0.2s;
+     background: white;
+     position: relative;
+   }
+  
+   .image-item:hover {
+     border-color: #4285f4;
+   }
+  
+   .image-item.selected {
+     border-color: #4285f4;
+     background: #e3f2fd;
+   }
+  
+    .image-item img {
+      width: 100%;
+      height: 70px;     /* Уменьшенная высота */
+      object-fit: cover;
+      border-radius: 4px;
+      cursor: pointer;
+      display: block;
+    }
+  
+   .image-item input {
+     margin-top: 5px;
+   }
+  
+   .buttons {
+     position: fixed;
+     bottom: 0;
+     left: 0;
+     right: 0;
+     background: white;
+     padding: 15px 20px;
+     border-top: 2px solid #ddd;
+     text-align: right;
+     box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+   }
+  
+   button {
+     padding: 10px 20px;
+     margin-left: 10px;
+     border: 1px solid #ddd;
+     border-radius: 4px;
+     cursor: pointer;
+     font-size: 14px;
+   }
+  
+   .primary {
+     background: #4285f4;
+     color: white;
+     border: none;
+   }
+  
+   .primary:hover {
+     background: #3367d6;
+   }
+  
+   .primary:disabled {
+     background: #ccc;
+     cursor: not-allowed;
+   }
+  
+   .counter {
+     color: #666;
+     font-size: 12px;
+   }
+ </style>
+</head>
+<body>
+
+ <div class="original-block">
+   <h4>📋 Исходные изображения из карточки (можно выбрать для обработки)</h4>
+   <div class="original-grid" id="originalGrid">
+     <? if (originalImages && originalImages.length > 0) { ?>
+       <? for (var i = 0; i < originalImages.length; i++) { ?>
+         <div class="image-item">
+           <img src="<?= originalImages[i] ?>"
+                onclick="toggleImageSelection(this)"
+                onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22120%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22%3EНет фото%3C/text%3E%3C/svg%3E'">
+           <input type="checkbox"
+                  data-source="original"
+                  value="<?= originalImages[i] ?>"
+                  onchange="updateCounter()">
+         </div>
+       <? } ?>
+     <? } else { ?>
+       <div style="padding: 20px; color: #666; text-align: center;">
+         Нет исходных изображений
+       </div>
+     <? } ?>
+   </div>
+ </div>
+
+ <div class="content">
+   <? if (supplierImages && supplierImages.length > 0) { ?>
+     <div class="source-block">
+       <div class="source-header">
+         <div class="source-title">🔍 Найдено поставщиком (<?= supplierImages.length ?>)</div>
+         <label class="select-all-source">
+           <input type="checkbox" onclick="toggleSource(this, 'supplier')">
+           Выбрать все
+         </label>
+       </div>
+       <div class="images-grid">
+         <? for (var i = 0; i < supplierImages.length; i++) { ?>
+           <div class="image-item">
+             <img src="<?= supplierImages[i] ?>"
+                  onclick="toggleImageSelection(this)"
+                  onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22120%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22%3EОшибка%3C/text%3E%3C/svg%3E'">
+             <input type="checkbox"
+                    data-source="supplier"
+                    value="<?= supplierImages[i] ?>"
+                    onchange="updateCounter()">
+           </div>
+         <? } ?>
+       </div>
+     </div>
+   <? } ?>
+
+   <? if (additionalImages && additionalImages.length > 0) { ?>
+     <div class="source-block">
+       <div class="source-header">
+         <div class="source-title">📁 Дополнительные изображения (<?= additionalImages.length ?>)</div>
+         <label class="select-all-source">
+           <input type="checkbox" onclick="toggleSource(this, 'additional')">
+           Выбрать все
+         </label>
+       </div>
+       <div class="images-grid">
+         <? for (var i = 0; i < additionalImages.length; i++) { ?>
+           <div class="image-item">
+             <img src="<?= additionalImages[i] ?>"
+                  onclick="toggleImageSelection(this)"
+                  onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22100%22%3E%3Crect fill=%22%23ddd%22 width=%22120%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22%3EОшибка%3C/text%3E%3C/svg%3E'">
+             <input type="checkbox"
+                    data-source="additional"
+                    value="<?= additionalImages[i] ?>"
+                    onchange="updateCounter()">
+           </div>
+         <? } ?>
+       </div>
+     </div>
+   <? } ?>
+
+   <? if ((!supplierImages || supplierImages.length === 0) &&
+          (!additionalImages || additionalImages.length === 0)) { ?>
+     <div class="source-block">
+       <div style="padding: 40px; text-align: center; color: #666;">
+         Нет дополнительных изображений для выбора.<br>
+         Выберите исходные изображения из карточки выше.
+       </div>
+     </div>
+   <? } ?>
+ </div>
+
+ <div class="buttons">
+   <span id="selectedCounter" class="counter">Выбрано: 0 изображений</span>
+   <button onclick="google.script.host.close()">Отмена</button>
+   <button class="primary" id="processButton" onclick="processSelectedImages()">
+     Обработать выбранные
+   </button>
+ </div>
+
+ <script>
+   // Переключение отдельного изображения
+   function toggleImageSelection(img) {
+     const checkbox = img.nextElementSibling;
+     checkbox.checked = !checkbox.checked;
+    
+     const item = img.parentElement;
+     if (checkbox.checked) {
+       item.classList.add('selected');
+     } else {
+       item.classList.remove('selected');
+     }
+    
+     updateCounter();
+   }
+
+   // Переключение всех в источнике
+   function toggleSource(checkbox, source) {
+     const checkboxes = document.querySelectorAll(`input[data-source="${source}"]`);
+     checkboxes.forEach(cb => {
+       cb.checked = checkbox.checked;
+       const item = cb.parentElement;
+       if (cb.checked) {
+         item.classList.add('selected');
+       } else {
+         item.classList.remove('selected');
+       }
+     });
+     updateCounter();
+   }
+
+   // Обновление счетчика
+   function updateCounter() {
+     const selected = document.querySelectorAll('input[data-source]:checked');
+     const counter = document.getElementById('selectedCounter');
+     if (counter) {
+       counter.textContent = `Выбрано: ${selected.length} изображений`;
+     }
+   }
+
+   // Обработка выбранных изображений
+   function processSelectedImages() {
+     const selectedUrls = [];
+     const checkboxes = document.querySelectorAll('input[data-source]:checked');
+    
+     checkboxes.forEach(cb => {
+       selectedUrls.push(cb.value);
+     });
+
+     if (selectedUrls.length === 0) {
+       alert('Выберите хотя бы одно изображение для обработки');
+       return;
+     }
+
+     console.log('Отправляем на обработку:', selectedUrls);
+
+     // Блокируем кнопку на время обработки
+     const button = document.getElementById('processButton');
+     button.disabled = true;
+     button.textContent = 'Обработка...';
+
+     google.script.run
+       .withSuccessHandler((result) => {
+         console.log('Обработка завершена успешно');
+         google.script.host.close();
+       })
+       .withFailureHandler((error) => {
+         console.error('Ошибка обработки:', error);
+         alert('Ошибка обработки: ' + error.message);
+         button.disabled = false;
+         button.textContent = 'Обработать выбранные';
+       })
+       .processSelectedImageUrls(selectedUrls);
+   }
+
+   // Инициализация счетчика при загрузке
+   window.onload = function() {
+     updateCounter();
+   };
+ </script>
+</body>
+</html>

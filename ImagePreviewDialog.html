@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      padding: 10px; 
+      margin-bottom: 80px; /* Отступ под фиксированные кнопки */
+    }
+    .product-group { 
+      margin-bottom: 20px; 
+      border: 1px solid #ddd; 
+      padding: 10px; 
+      border-radius: 4px;
+    }
+    .product-title { 
+      font-weight: bold; 
+      margin-bottom: 10px; 
+      color: #333;
+    }
+    .select-all { 
+      margin: 10px 0; 
+      padding: 8px; 
+      background: #f0f0f0; 
+      border-radius: 4px;
+    }
+    .images-grid { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); 
+      gap: 10px; 
+    }
+    .image-item { 
+      text-align: center; 
+      border: 1px solid #eee; 
+      padding: 5px; 
+      border-radius: 4px;
+      transition: border-color 0.2s;
+    }
+    .image-item:hover {
+      border-color: #4285f4;
+    }
+    .image-item img { 
+      width: 100%; 
+      height: 120px; 
+      object-fit: cover; 
+      cursor: pointer; 
+      border-radius: 3px;
+    }
+    .image-item input { 
+      margin-top: 5px; 
+    }
+    .buttons {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      padding: 15px;
+      text-align: right;
+      border-top: 2px solid #ddd;
+      z-index: 1000;
+      box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+    }
+    button { 
+      padding: 10px 20px; 
+      margin-left: 8px; 
+      cursor: pointer; 
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .primary { 
+      background: #4285f4; 
+      color: white; 
+      border: none; 
+    }
+    .primary:hover {
+      background: #3367d6;
+    }
+  </style>
+</head>
+<body>
+  <h3>Найдено изображений: выберите нужные</h3>
+  
+  <? for (var i = 0; i < results.length; i++) { ?>
+    <div class="product-group">
+      <div class="product-title">
+        <?= results[i].productArticle ?> (<?= results[i].supplier ?>)
+      </div>
+      <div class="select-all">
+        <input type="checkbox" 
+               id="selectAll_<?= results[i].productArticle ?>"
+               onclick="toggleGroup(this, '<?= results[i].productArticle ?>')">
+        <label for="selectAll_<?= results[i].productArticle ?>">
+          Выбрать все (<?= results[i].images.length ?>)
+        </label>
+      </div>
+      <div class="images-grid">
+        <? for (var j = 0; j < results[i].images.length; j++) { ?>
+          <div class="image-item">
+            <img src="<?= results[i].images[j] ?>"
+                 onclick="this.nextElementSibling.click()"
+                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22150%22 height=%22120%22%3E%3Crect fill=%22%23ddd%22 width=%22150%22 height=%22120%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22%3EОшибка%3C/text%3E%3C/svg%3E'">
+            <input type="checkbox"
+                   data-product="<?= results[i].productArticle ?>"
+                   value="<?= results[i].images[j] ?>">
+          </div>
+        <? } ?>
+      </div>
+    </div>
+  <? } ?>
+
+  <!-- Кнопки управления -->
+  <div class="buttons">
+    <button onclick="google.script.host.close()">Отмена</button>
+    <button class="primary" onclick="saveSelected()">Сохранить выбранные</button>
+  </div>
+
+  <!-- Скрипты -->
+  <script>
+    // Переключение всех чекбоксов группы
+    function toggleGroup(checkbox, productArticle) {
+      const checkboxes = document.querySelectorAll(`input[data-product="${productArticle}"]`);
+      checkboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+      });
+    }
+
+    // Сохранение выбранных изображений
+    function saveSelected() {
+      const selections = {};
+      
+      // Собираем отмеченные изображения
+      document.querySelectorAll('input[type="checkbox"][data-product]:checked').forEach(cb => {
+        const product = cb.dataset.product;
+        if (!selections[product]) {
+          selections[product] = [];
+        }
+        selections[product].push(cb.value);
+      });
+      
+      // Проверка
+      if (Object.keys(selections).length === 0) {
+        alert('Выберите хотя бы одно изображение');
+        return;
+      }
+      
+      console.log('Отправляем на сохранение:', selections);
+      
+      // Вызов серверной функции
+      google.script.run
+        .withSuccessHandler(() => {
+          alert('Изображения сохранены в колонку F!');
+          google.script.host.close();
+        })
+        .withFailureHandler(err => {
+          console.error('Ошибка сохранения:', err);
+          alert('Ошибка: ' + err.message);
+        })
+        .saveSelectedImages(selections);
+    }
+  </script>
+</body>
+</html>
