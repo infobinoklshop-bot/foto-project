@@ -34,6 +34,11 @@ function onOpen() {
      .addItem('📥 Загрузить товары', 'loadProductsFromInSalesMenu')
      .addItem('🔍 Спарсить у поставщиков', 'showSupplierParsingDialog')
      .addSeparator()
+
+     // НОВЫЙ ФУНКЦИОНАЛ: Импорт полных карточек
+     .addItem('🆕 Импорт товаров от поставщиков', 'showFullProductImportDialog')
+     .addSeparator()
+
      .addItem('🤖 Обработать изображения', 'showImageSelectionForProcessing')
      .addItem('🤖 Выбрать модель', 'configureReplicateModel')
      .addItem('🎛️ Настроить качество улучшения', 'configureReplicateScale')
@@ -1162,11 +1167,343 @@ function configureReplicateModel() {
  * 3. Добавьте обработку ошибок через showErrorDialog()
  * 
  * ГОТОВНОСТЬ К ЭТАПАМ:
- * 
+ *
  * - Этап 2: ✅ Полностью готово
  * - Этап 3: 🔄 AI-функции как заглушки
- * - Этап 4: 🔄 Внешние сервисы как заглушки  
+ * - Этап 4: 🔄 Внешние сервисы как заглушки
  * - Этап 5: 🔄 Расширенный мониторинг как заглушки
- * 
+ *
  * ===================================================================
  */
+
+
+// ========================================
+// НОВЫЙ ФУНКЦИОНАЛ: ИМПОРТ ПОЛНЫХ КАРТОЧЕК ТОВАРОВ
+// ========================================
+
+/**
+ * ДИАЛОГ ИМПОРТА ТОВАРОВ ОТ ПОСТАВЩИКОВ
+ *
+ * Показывает пользовательский интерфейс для пошагового импорта:
+ * 1. Парсинг полных карточек от поставщиков
+ * 2. Нормализация характеристик
+ * 3. AI-рерайт описаний
+ * 4. Проверка дубликатов
+ * 5. Создание в InSales
+ */
+function showFullProductImportDialog() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h2 {
+      color: #1a73e8;
+      margin-top: 0;
+    }
+    .step {
+      background: #f8f9fa;
+      border-left: 4px solid #1a73e8;
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 4px;
+    }
+    .step h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    .btn {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+    }
+    .btn:hover {
+      background: #1557b0;
+    }
+    .btn-success {
+      background: #34a853;
+    }
+    .btn-success:hover {
+      background: #2d8e47;
+    }
+    .btn-warning {
+      background: #fbbc04;
+      color: #333;
+    }
+    .btn-warning:hover {
+      background: #e5aa04;
+    }
+    .info-box {
+      background: #e8f0fe;
+      border: 1px solid #d2e3fc;
+      padding: 12px;
+      border-radius: 4px;
+      margin: 15px 0;
+    }
+    .warning-box {
+      background: #fef7e0;
+      border: 1px solid #fce8b2;
+      padding: 12px;
+      border-radius: 4px;
+      margin: 15px 0;
+    }
+    .input-group {
+      margin: 15px 0;
+    }
+    .input-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    .input-group input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🆕 Импорт товаров от поставщиков</h2>
+
+    <div class="info-box">
+      <strong>📋 Инструкция:</strong><br>
+      1. Введите артикулы товаров (по одному на строку)<br>
+      2. Выберите поставщика<br>
+      3. Система автоматически выполнит все этапы обработки<br>
+      4. Проверьте результаты в таблице перед публикацией
+    </div>
+
+    <div class="input-group">
+      <label>Артикулы товаров:</label>
+      <textarea id="articles" rows="10" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
+        placeholder="Введите артикулы, по одному на строку. Например:
+VEBER-10x42
+STURMAN-8x32
+БН-123"></textarea>
+    </div>
+
+    <div class="input-group">
+      <label>Поставщик:</label>
+      <select id="supplier" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <option value="veber">Veber.ru</option>
+        <option value="sturman">Sturman.ru</option>
+      </select>
+    </div>
+
+    <div class="warning-box">
+      <strong>⚠️ Внимание:</strong> Процесс может занять несколько минут на товар.
+      Рекомендуется импортировать не более 10 товаров за раз.
+    </div>
+
+    <div class="step">
+      <h3>Этапы обработки:</h3>
+      <ol>
+        <li>🔍 Парсинг полной карточки (описание, характеристики, изображения, цена)</li>
+        <li>📊 Нормализация характеристик по справочнику</li>
+        <li>🤖 AI-рерайт описания для уникальности</li>
+        <li>🔎 Проверка дубликатов в InSales</li>
+        <li>✅ Запись в таблицу для ручной проверки</li>
+      </ol>
+    </div>
+
+    <div style="text-align: center; margin-top: 20px;">
+      <button class="btn btn-success" onclick="runFullImport()">
+        🚀 Начать импорт
+      </button>
+      <button class="btn" onclick="runStepByStep()">
+        📝 Пошаговый режим
+      </button>
+      <button class="btn btn-warning" onclick="google.script.host.close()">
+        ❌ Отмена
+      </button>
+    </div>
+  </div>
+
+  <script>
+    function runFullImport() {
+      const articles = document.getElementById('articles').value.trim();
+      const supplier = document.getElementById('supplier').value;
+
+      if (!articles) {
+        alert('Пожалуйста, введите артикулы товаров');
+        return;
+      }
+
+      const articleList = articles.split('\\n').map(a => a.trim()).filter(a => a);
+
+      if (articleList.length === 0) {
+        alert('Список артикулов пуст');
+        return;
+      }
+
+      if (articleList.length > 30) {
+        alert('Максимум 30 товаров за раз. Пожалуйста, уменьшите количество.');
+        return;
+      }
+
+      if (!confirm(\`Начать импорт \${articleList.length} товаров от \${supplier}?\\n\\nПроцесс может занять \${articleList.length * 2} минут.\`)) {
+        return;
+      }
+
+      document.body.innerHTML = '<div class="container"><h2>⏳ Импорт в процессе...</h2><p>Пожалуйста, не закрывайте это окно.</p></div>';
+
+      google.script.run
+        .withSuccessHandler(onImportSuccess)
+        .withFailureHandler(onImportError)
+        .executeFullProductImport(articleList, supplier);
+    }
+
+    function runStepByStep() {
+      alert('Пошаговый режим:\\n\\n1. Используйте меню "🔍 Спарсить у поставщиков"\\n2. Затем выберите нужные функции вручную');
+      google.script.host.close();
+    }
+
+    function onImportSuccess(result) {
+      alert(\`✅ Импорт завершен!\\n\\nУспешно: \${result.success}\\nОшибки: \${result.errors}\\n\\nПроверьте результаты в таблице.\`);
+      google.script.host.close();
+    }
+
+    function onImportError(error) {
+      alert('❌ Ошибка импорта: ' + error.message);
+      google.script.host.close();
+    }
+  </script>
+</body>
+</html>
+    `;
+
+    const htmlOutput = HtmlService.createHtmlOutput(htmlContent)
+      .setWidth(600)
+      .setHeight(700);
+
+    ui.showModalDialog(htmlOutput, 'Импорт товаров от поставщиков');
+
+  } catch (error) {
+    handleError(error, 'Диалог импорта товаров');
+    SpreadsheetApp.getUi().alert('Ошибка', 'Не удалось открыть диалог импорта: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+
+/**
+ * ВЫПОЛНЕНИЕ ПОЛНОГО ИМПОРТА ТОВАРОВ
+ *
+ * @param {Array<string>} articles - Список артикулов
+ * @param {string} supplier - Поставщик (veber, sturman)
+ * @returns {Object} Результат импорта
+ */
+function executeFullProductImport(articles, supplier) {
+  try {
+    logInfo(`🚀 Полный импорт ${articles.length} товаров от ${supplier}`);
+
+    let successCount = 0;
+    let errorCount = 0;
+    const errors = [];
+
+    for (let i = 0; i < articles.length; i++) {
+      const article = articles[i];
+
+      try {
+        logInfo(`[${i + 1}/${articles.length}] Импорт ${article}`);
+
+        // 1. Парсинг полной карточки
+        let productData;
+        if (supplier === 'veber') {
+          productData = parseVeberFullProduct(article);
+        } else if (supplier === 'sturman') {
+          productData = parseSturmanFullProduct(article);
+        } else {
+          throw new Error(`Неизвестный поставщик: ${supplier}`);
+        }
+
+        if (!productData) {
+          throw new Error('Не удалось спарсить товар');
+        }
+
+        // 2. Нормализация характеристик
+        const specsRaw = JSON.parse(productData.specifications || '{}');
+        const normalized = normalizeSpecifications(specsRaw, supplier);
+
+        // 3. AI-рерайт описания
+        const aiResult = generateProductDescription({
+          article: article,
+          productName: productData.title,
+          description: productData.description,
+          specifications: normalized.normalized,
+          brand: productData.brand,
+          categories: productData.categories
+        });
+
+        // 4. Проверка дубликатов
+        const matchResult = checkProductDuplicate(article, productData.title);
+
+        // 5. Запись в таблицу
+        writeFullProductData({
+          article: article,
+          productName: productData.title,
+          description: productData.description,
+          descriptionRewritten: aiResult.rewrittenDescription,
+          shortDescription: aiResult.shortDescription,
+          specificationsRaw: productData.specifications,
+          specificationsNormalized: JSON.stringify(normalized.normalized),
+          price: productData.price,
+          stock: productData.stock,
+          categories: productData.categories,
+          brand: productData.brand,
+          supplierImages: productData.images.join('\n'),
+          matchStatus: matchResult.matchStatus,
+          matchConfidence: matchResult.confidence,
+          importStatus: 'Импортирован, требует проверки'
+        });
+
+        logInfo(`✅ [${i + 1}/${articles.length}] ${article}: успешно импортирован`);
+        successCount++;
+
+        // Пауза между товарами
+        if (i < articles.length - 1) {
+          Utilities.sleep(3000);
+        }
+
+      } catch (error) {
+        logError(`❌ [${i + 1}/${articles.length}] ${article}: ${error.message}`, error);
+        errors.push(`${article}: ${error.message}`);
+        errorCount++;
+      }
+    }
+
+    logInfo(`✅ Импорт завершен: успешно ${successCount}, ошибок ${errorCount}`);
+
+    return {
+      success: successCount,
+      errors: errorCount,
+      errorDetails: errors
+    };
+
+  } catch (error) {
+    handleError(error, 'Полный импорт товаров');
+    throw error;
+  }
+}

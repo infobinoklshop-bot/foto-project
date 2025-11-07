@@ -71,7 +71,25 @@ const IMAGES_COLUMNS = {
   ALT_TAGS: 9,              // I - Alt-теги (СДВИГ +2)
   SEO_FILENAMES: 10,        // J - SEO имена файлов (СДВИГ +2)
   PROCESSING_STATUS: 11,    // K - Статус обработки (СДВИГ +2)
-  INSALES_STATUS: 12        // L - Статус InSales (СДВИГ +2)
+  INSALES_STATUS: 12,       // L - Статус InSales (СДВИГ +2)
+
+  // ========== НОВЫЕ КОЛОНКИ ДЛЯ ИМПОРТА ТОВАРОВ ==========
+  DESCRIPTION: 13,              // M - Описание от поставщика
+  DESCRIPTION_REWRITTEN: 14,    // N - Рерайт описания (AI)
+  SHORT_DESCRIPTION: 15,        // O - Краткое описание
+  SPECIFICATIONS_RAW: 16,       // P - Характеристики (JSON от поставщика)
+  SPECIFICATIONS_NORMALIZED: 17,// Q - Нормализованные характеристики (JSON)
+  PRICE: 18,                    // R - Цена поставщика
+  STOCK: 19,                    // S - Остаток
+  CATEGORIES: 20,               // T - Категории
+  BRAND: 21,                    // U - Бренд
+  SERIES: 22,                   // V - Серия
+  WEIGHT: 23,                   // W - Вес, г
+  DIMENSIONS: 24,               // X - Габариты (ДxШxВ)
+  PACKAGE_CONTENTS: 25,         // Y - Комплектация
+  MATCH_STATUS: 26,             // Z - Статус сопоставления (новый/существующий/дубль)
+  MATCH_CONFIDENCE: 27,         // AA - Уверенность в совпадении (%)
+  IMPORT_STATUS: 28             // AB - Статус импорта
 };
 
 // =============================================================================

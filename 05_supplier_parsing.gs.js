@@ -815,3 +815,252 @@ function saveSelectedImages(selections) {
     throw error;
   }
 }
+
+// =============================================================================
+// 🆕 ПАРСИНГ ПОЛНЫХ КАРТОЧЕК ТОВАРОВ
+// =============================================================================
+
+/**
+ * ПАРСИНГ ПОЛНОЙ КАРТОЧКИ VEBER.RU
+ */
+function parseVeberFullProduct(articleOrUrl) {
+  try {
+    logInfo(`🔍 Парсим полную карточку Veber: ${articleOrUrl}`);
+
+    let productUrl = articleOrUrl;
+
+    // Если передан артикул, ищем товар
+    if (!articleOrUrl.includes('http')) {
+      const searchUrl = `https://veber.ru/search?q=${encodeURIComponent(articleOrUrl)}`;
+      const searchHtml = UrlFetchApp.fetch(searchUrl, {
+        muteHttpExceptions: true,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }).getContentText();
+
+      // Извлекаем ссылку на товар
+      const linkMatch = searchHtml.match(/href="(\/product\/[^"]+)"/i);
+      if (!linkMatch) {
+        logWarning(`⚠️ Товар ${articleOrUrl} не найден на Veber`);
+        return null;
+      }
+      productUrl = 'https://veber.ru' + linkMatch[1];
+    }
+
+    logInfo(`📄 Загружаем страницу: ${productUrl}`);
+    const html = UrlFetchApp.fetch(productUrl, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }).getContentText();
+
+    // Извлекаем данные
+    const result = {
+      url: productUrl,
+      images: extractVeberImages(html),
+      title: extractVeberTitle(html),
+      description: extractVeberDescription(html),
+      specifications: extractVeberSpecifications(html),
+      price: extractVeberPrice(html),
+      stock: extractVeberStock(html),
+      brand: extractVeberBrand(html)
+    };
+
+    logInfo(`✅ Спарсено: ${result.title}`);
+    return result;
+
+  } catch (error) {
+    logError('Ошибка парсинга Veber', error);
+    return null;
+  }
+}
+
+function extractVeberImages(html) {
+  const images = new Set();
+  const matches = html.matchAll(/href="(\/upload\/iblock\/[^"]+\.jpg)"/gi);
+  for (const match of matches) {
+    const url = 'https://veber.ru' + match[1];
+    if (!url.match(/logo|banner|icon|button/i)) {
+      images.add(url);
+    }
+  }
+  return Array.from(images).join('\n');
+}
+
+function extractVeberTitle(html) {
+  const match = html.match(/<h1[^>]*>(.*?)<\/h1>/is);
+  return match ? cleanHtml(match[1]).trim() : '';
+}
+
+function extractVeberDescription(html) {
+  // Ищем блок описания
+  let desc = html.match(/<div[^>]*class="[^"]*description[^"]*"[^>]*>(.*?)<\/div>/is);
+  if (!desc) desc = html.match(/<div[^>]*itemprop="description"[^>]*>(.*?)<\/div>/is);
+  return desc ? cleanHtml(desc[1]).trim() : '';
+}
+
+function extractVeberSpecifications(html) {
+  const specs = {};
+
+  // Парсим таблицу характеристик
+  const tableMatch = html.match(/<table[^>]*class="[^"]*charact[^"]*"[^>]*>(.*?)<\/table>/is);
+  if (tableMatch) {
+    const rows = tableMatch[1].matchAll(/<tr[^>]*>.*?<td[^>]*>(.*?)<\/td>.*?<td[^>]*>(.*?)<\/td>.*?<\/tr>/gis);
+    for (const row of rows) {
+      const key = cleanHtml(row[1]).trim();
+      const value = cleanHtml(row[2]).trim();
+      if (key && value) specs[key] = value;
+    }
+  }
+
+  return JSON.stringify(specs);
+}
+
+function extractVeberPrice(html) {
+  const priceMatch = html.match(/data-price="(\d+)"/i) ||
+                     html.match(/<span[^>]*class="[^"]*price[^"]*"[^>]*>(\d+)/i);
+  return priceMatch ? priceMatch[1] : '';
+}
+
+function extractVeberStock(html) {
+  if (html.match(/в наличии/i) || html.match(/in stock/i)) return 'В наличии';
+  if (html.match(/под заказ/i)) return 'Под заказ';
+  return 'Уточняйте';
+}
+
+function extractVeberBrand(html) {
+  const match = html.match(/<span[^>]*itemprop="brand"[^>]*>(.*?)<\/span>/is) ||
+                html.match(/Бренд:[^<]*<[^>]*>([^<]+)</is);
+  return match ? cleanHtml(match[1]).trim() : '';
+}
+
+/**
+ * ПАРСИНГ ПОЛНОЙ КАРТОЧКИ STURMAN.RU
+ */
+function parseSturmanFullProduct(articleOrUrl) {
+  try {
+    logInfo(`🔍 Парсим полную карточку Sturman: ${articleOrUrl}`);
+
+    let productUrl = articleOrUrl;
+
+    // Если передан артикул, ищем товар
+    if (!articleOrUrl.includes('http')) {
+      const searchUrl = `https://sturman.ru/opt/search/?query=${encodeURIComponent(articleOrUrl)}`;
+      const searchHtml = UrlFetchApp.fetch(searchUrl, {
+        muteHttpExceptions: true,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }).getContentText();
+
+      const linkMatch = searchHtml.match(/href="(\/opt\/product\/[^"]+)"/i);
+      if (!linkMatch) {
+        logWarning(`⚠️ Товар ${articleOrUrl} не найден на Sturman`);
+        return null;
+      }
+      productUrl = 'https://sturman.ru' + linkMatch[1];
+    }
+
+    logInfo(`📄 Загружаем страницу: ${productUrl}`);
+    const html = UrlFetchApp.fetch(productUrl, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }).getContentText();
+
+    const result = {
+      url: productUrl,
+      images: extractSturmanImages(html),
+      title: extractSturmanTitle(html),
+      description: extractSturmanDescription(html),
+      specifications: extractSturmanSpecifications(html),
+      price: extractSturmanPrice(html),
+      stock: extractSturmanStock(html),
+      brand: extractSturmanBrand(html)
+    };
+
+    logInfo(`✅ Спарсено: ${result.title}`);
+    return result;
+
+  } catch (error) {
+    logError('Ошибка парсинга Sturman', error);
+    return null;
+  }
+}
+
+function extractSturmanImages(html) {
+  const images = new Set();
+  const patterns = [
+    /href="([^"]*\/wa-data\/public\/shop\/products\/[^"]+\.750x0\.jpg)"/gi,
+    /data-fancybox[^>]*href="([^"]+\.jpg)"/gi,
+    /data-image="([^"]+\.jpg)"/gi
+  ];
+
+  for (const pattern of patterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      let url = match[1];
+      if (url.startsWith('/')) url = 'https://sturman.ru' + url;
+      if (!url.match(/logo|banner|watermark/i)) {
+        images.add(url);
+      }
+    }
+  }
+
+  return Array.from(images).join('\n');
+}
+
+function extractSturmanTitle(html) {
+  const match = html.match(/<h1[^>]*itemprop="name"[^>]*>(.*?)<\/h1>/is) ||
+                html.match(/<h1[^>]*>(.*?)<\/h1>/is);
+  return match ? cleanHtml(match[1]).trim() : '';
+}
+
+function extractSturmanDescription(html) {
+  const match = html.match(/<div[^>]*itemprop="description"[^>]*>(.*?)<\/div>/is) ||
+                html.match(/<div[^>]*class="[^"]*description[^"]*"[^>]*>(.*?)<\/div>/is);
+  return match ? cleanHtml(match[1]).trim() : '';
+}
+
+function extractSturmanSpecifications(html) {
+  const specs = {};
+
+  // Webasyst структура характеристик
+  const featuresMatch = html.match(/<div[^>]*class="[^"]*wa-product-features[^"]*"[^>]*>(.*?)<\/div>/is);
+  if (featuresMatch) {
+    const items = featuresMatch[1].matchAll(/<div[^>]*class="feature[^"]*"[^>]*>.*?<span[^>]*class="name"[^>]*>(.*?)<\/span>.*?<span[^>]*class="value"[^>]*>(.*?)<\/span>/gis);
+    for (const item of items) {
+      const key = cleanHtml(item[1]).trim();
+      const value = cleanHtml(item[2]).trim();
+      if (key && value) specs[key] = value;
+    }
+  }
+
+  return JSON.stringify(specs);
+}
+
+function extractSturmanPrice(html) {
+  const match = html.match(/<span[^>]*itemprop="price"[^>]*content="(\d+)"/i) ||
+                html.match(/<span[^>]*class="[^"]*price[^"]*"[^>]*>(\d+)/i);
+  return match ? match[1] : '';
+}
+
+function extractSturmanStock(html) {
+  if (html.match(/в наличии/i) || html.match(/itemprop="availability"[^>]*>InStock/i)) return 'В наличии';
+  return 'Уточняйте';
+}
+
+function extractSturmanBrand(html) {
+  const match = html.match(/<span[^>]*itemprop="brand"[^>]*>(.*?)<\/span>/is);
+  return match ? cleanHtml(match[1]).trim() : '';
+}
+
+/**
+ * ВСПОМОГАТЕЛЬНАЯ: Очистка HTML
+ */
+function cleanHtml(text) {
+  return text
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

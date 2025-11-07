@@ -120,7 +120,7 @@ function setupHeaders(sheet) {
    
     const headers = [
       '☑️ Обработать',           // A - CHECKBOX
-      'Артикул',                // B - ARTICLE 
+      'Артикул',                // B - ARTICLE
       'ID InSales',             // C - INSALES_ID
       'Название товара',         // D - PRODUCT_NAME
       'Исходные изображения',    // E - ORIGINAL_IMAGES
@@ -130,7 +130,24 @@ function setupHeaders(sheet) {
       'Alt-теги',               // I - ALT_TAGS
       'SEO имена файлов',       // J - SEO_FILENAMES
       'Статус обработки',       // K - PROCESSING_STATUS
-      'Статус InSales'          // L - INSALES_STATUS
+      'Статус InSales',         // L - INSALES_STATUS
+      // === НОВЫЕ КОЛОНКИ ДЛЯ ИМПОРТА ===
+      'Описание поставщика',    // M - DESCRIPTION
+      'Описание (рерайт AI)',   // N - DESCRIPTION_REWRITTEN
+      'Краткое описание',       // O - SHORT_DESCRIPTION
+      'Характеристики (сырые)', // P - SPECIFICATIONS_RAW
+      'Характеристики (норм.)', // Q - SPECIFICATIONS_NORMALIZED
+      'Цена',                   // R - PRICE
+      'Остаток',                // S - STOCK
+      'Категории',              // T - CATEGORIES
+      'Бренд',                  // U - BRAND
+      'Серия',                  // V - SERIES
+      'Вес, г',                 // W - WEIGHT
+      'Габариты',               // X - DIMENSIONS
+      'Комплектация',           // Y - PACKAGE_CONTENTS
+      'Статус сопоставления',   // Z - MATCH_STATUS
+      'Совпадение, %',          // AA - MATCH_CONFIDENCE
+      'Статус импорта'          // AB - IMPORT_STATUS
     ];
     
     // Записываем заголовки в первую строку
@@ -1362,3 +1379,121 @@ function updateProductData(article, updateData) {
  * 
  * ===================================================================
  */
+
+// =============================================================================
+// 🆕 ФУНКЦИИ ДЛЯ ИМПОРТА ПОЛНЫХ КАРТОЧЕК ТОВАРОВ
+// =============================================================================
+
+/**
+ * ЗАПИСЬ ПОЛНОЙ КАРТОЧКИ ТОВАРА (ДЛЯ ИМПОРТА)
+ *
+ * Записывает все данные товара, включая характеристики, описания, цену
+ *
+ * @param {Object} productData - Полные данные товара
+ * @returns {boolean} true если успешно
+ */
+function writeFullProductData(productData) {
+  try {
+    logInfo(`📝 Записываем полную карточку товара: ${productData.article}`);
+
+    const sheet = getImagesSheet();
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const data = sheet.getDataRange().getValues();
+
+    // Ищем существующий товар
+    let targetRow = -1;
+    const articleCol = IMAGES_COLUMNS.ARTICLE - 1;
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][articleCol] === productData.article) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+
+    // Если не найден - создаем новую строку
+    if (targetRow === -1) {
+      targetRow = sheet.getLastRow() + 1;
+    }
+
+    // Подготовка значений для всех колонок
+    const rowData = new Array(Object.keys(IMAGES_COLUMNS).length).fill('');
+
+    rowData[IMAGES_COLUMNS.CHECKBOX - 1] = false;
+    rowData[IMAGES_COLUMNS.ARTICLE - 1] = productData.article || '';
+    rowData[IMAGES_COLUMNS.INSALES_ID - 1] = productData.insalesId || '';
+    rowData[IMAGES_COLUMNS.PRODUCT_NAME - 1] = productData.productName || '';
+    rowData[IMAGES_COLUMNS.ORIGINAL_IMAGES - 1] = productData.originalImages || '';
+    rowData[IMAGES_COLUMNS.SUPPLIER_IMAGES - 1] = productData.supplierImages || '';
+    rowData[IMAGES_COLUMNS.ADDITIONAL_IMAGES - 1] = productData.additionalImages || '';
+    rowData[IMAGES_COLUMNS.PROCESSED_IMAGES - 1] = productData.processedImages || '';
+    rowData[IMAGES_COLUMNS.ALT_TAGS - 1] = productData.altTags || '';
+    rowData[IMAGES_COLUMNS.SEO_FILENAMES - 1] = productData.seoFilenames || '';
+    rowData[IMAGES_COLUMNS.PROCESSING_STATUS - 1] = productData.processingStatus || STATUS_VALUES.PROCESSING.NOT_PROCESSED;
+    rowData[IMAGES_COLUMNS.INSALES_STATUS - 1] = productData.insalesStatus || STATUS_VALUES.INSALES.NOT_SENT;
+
+    // Новые поля для импорта
+    rowData[IMAGES_COLUMNS.DESCRIPTION - 1] = productData.description || '';
+    rowData[IMAGES_COLUMNS.DESCRIPTION_REWRITTEN - 1] = productData.descriptionRewritten || '';
+    rowData[IMAGES_COLUMNS.SHORT_DESCRIPTION - 1] = productData.shortDescription || '';
+    rowData[IMAGES_COLUMNS.SPECIFICATIONS_RAW - 1] = productData.specificationsRaw || '';
+    rowData[IMAGES_COLUMNS.SPECIFICATIONS_NORMALIZED - 1] = productData.specificationsNormalized || '';
+    rowData[IMAGES_COLUMNS.PRICE - 1] = productData.price || '';
+    rowData[IMAGES_COLUMNS.STOCK - 1] = productData.stock || '';
+    rowData[IMAGES_COLUMNS.CATEGORIES - 1] = productData.categories || '';
+    rowData[IMAGES_COLUMNS.BRAND - 1] = productData.brand || '';
+    rowData[IMAGES_COLUMNS.SERIES - 1] = productData.series || '';
+    rowData[IMAGES_COLUMNS.WEIGHT - 1] = productData.weight || '';
+    rowData[IMAGES_COLUMNS.DIMENSIONS - 1] = productData.dimensions || '';
+    rowData[IMAGES_COLUMNS.PACKAGE_CONTENTS - 1] = productData.packageContents || '';
+    rowData[IMAGES_COLUMNS.MATCH_STATUS - 1] = productData.matchStatus || '';
+    rowData[IMAGES_COLUMNS.MATCH_CONFIDENCE - 1] = productData.matchConfidence || '';
+    rowData[IMAGES_COLUMNS.IMPORT_STATUS - 1] = productData.importStatus || 'Спарсено';
+
+    // Записываем строку
+    sheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+
+    logInfo(`✅ Товар ${productData.article} записан в строку ${targetRow}`);
+    return true;
+
+  } catch (error) {
+    handleError(error, 'Запись полной карточки товара', {
+      article: productData.article
+    });
+    return false;
+  }
+}
+
+/**
+ * ОБНОВЛЕНИЕ ОДНОГО ПОЛЯ ТОВАРА
+ *
+ * @param {string} article - Артикул товара
+ * @param {string} fieldName - Название поля из IMAGES_COLUMNS
+ * @param {any} value - Новое значение
+ */
+function updateProductField(article, fieldName, value) {
+  try {
+    const sheet = getImagesSheet();
+    const data = sheet.getDataRange().getValues();
+    const columnIndex = IMAGES_COLUMNS[fieldName.toUpperCase()];
+
+    if (!columnIndex) {
+      throw new Error(`Неизвестное поле: ${fieldName}`);
+    }
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][IMAGES_COLUMNS.ARTICLE - 1] === article) {
+        sheet.getRange(i + 1, columnIndex).setValue(value);
+        logInfo(`✅ Обновлено поле ${fieldName} для ${article}`);
+        return true;
+      }
+    }
+
+    logWarning(`⚠️ Товар ${article} не найден`);
+    return false;
+
+  } catch (error) {
+    handleError(error, 'Обновление поля товара');
+    return false;
+  }
+}

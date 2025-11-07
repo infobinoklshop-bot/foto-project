@@ -1108,6 +1108,370 @@ function updateProductDirect(article, updateData) {
 }
 
 
+/**
+ * СОЗДАНИЕ НОВОГО ТОВАРА В INSALES
+ *
+ * @param {Object} productData - Данные для создания товара
+ * @returns {Object} Созданный товар с ID
+ */
+async function createProductInInSales(productData) {
+  try {
+    logInfo(`🆕 Создаем товар в InSales: ${productData.article}`);
+
+    // Валидация обязательных полей
+    if (!productData.article) {
+      throw new Error('Артикул обязателен для создания товара');
+    }
+
+    if (!productData.productName) {
+      throw new Error('Название товара обязательно');
+    }
+
+    // Формируем payload для InSales API
+    const productPayload = {
+      product: {
+        title: productData.productName,
+        description: productData.descriptionRewritten || productData.description || '',
+        short_description: productData.shortDescription || '',
+
+        // Основные параметры
+        available: true,
+        is_hidden: true, // По умолчанию скрываем до проверки
+
+        // Цена (обязательное поле)
+        price: parseFloat(productData.price) || 0,
+
+        // Характеристики
+        characteristics: buildCharacteristicsForInSales(productData.specificationsNormalized),
+
+        // Вес и габариты
+        weight: parseFloat(productData.weight) || null,
+        dimensions: productData.dimensions || null,
+
+        // Комплектация
+        package_contents: productData.packageContents || null,
+
+        // Бренд (как custom field)
+        fields_values_attributes: buildCustomFields(productData),
+
+        // Варианты товара с артикулом
+        variants_attributes: [
+          {
+            sku: productData.article,
+            price: parseFloat(productData.price) || 0,
+            quantity: parseInt(productData.stock) || 0,
+            available: true
+          }
+        ]
+      }
+    };
+
+    // Категории (если указаны)
+    if (productData.categories) {
+      const categoryIds = await findOrCreateCategories(productData.categories);
+      if (categoryIds && categoryIds.length > 0) {
+        productPayload.product.category_id = categoryIds[0]; // Основная категория
+      }
+    }
+
+    logInfo('📦 Отправляем запрос на создание товара');
+
+    // Создаем товар
+    const response = await makeInsalesRequest(
+      'POST',
+      INSALES_ENDPOINTS.PRODUCTS,
+      productPayload
+    );
+
+    if (!response || !response.id) {
+      throw new Error('InSales не вернул ID созданного товара');
+    }
+
+    logInfo(`✅ Товар создан в InSales, ID: ${response.id}`);
+
+    // Загружаем изображения (если есть)
+    if (productData.supplierImages) {
+      await uploadProductImages(response.id, productData.supplierImages);
+    }
+
+    // Обновляем таблицу
+    updateProductField(productData.article, IMAGES_COLUMNS.INSALES_ID, response.id);
+    updateProductField(productData.article, IMAGES_COLUMNS.IMPORT_STATUS, 'Создан в InSales');
+    updateProductField(productData.article, IMAGES_COLUMNS.INSALES_STATUS, STATUS_VALUES.INSALES.SENT);
+
+    return response;
+
+  } catch (error) {
+    handleError(error, 'Создание товара в InSales');
+
+    // Обновляем статус ошибки
+    if (productData.article) {
+      updateProductField(
+        productData.article,
+        IMAGES_COLUMNS.IMPORT_STATUS,
+        `Ошибка: ${error.message}`
+      );
+    }
+
+    throw error;
+  }
+}
+
+
+/**
+ * ФОРМИРОВАНИЕ ХАРАКТЕРИСТИК ДЛЯ INSALES
+ */
+function buildCharacteristicsForInSales(specificationsJson) {
+  try {
+    if (!specificationsJson) return [];
+
+    const specs = typeof specificationsJson === 'string'
+      ? JSON.parse(specificationsJson)
+      : specificationsJson;
+
+    const characteristics = [];
+
+    for (const [key, value] of Object.entries(specs)) {
+      if (value) {
+        // Убираем префикс "Параметр: " из названия
+        const cleanKey = key.replace(/^Параметр:\s*/i, '');
+
+        characteristics.push({
+          title: cleanKey,
+          value: String(value)
+        });
+      }
+    }
+
+    return characteristics;
+
+  } catch (error) {
+    logWarning('⚠️ Ошибка формирования характеристик', error);
+    return [];
+  }
+}
+
+
+/**
+ * ФОРМИРОВАНИЕ КАСТОМНЫХ ПОЛЕЙ (БРЕНД, СЕРИЯ)
+ */
+function buildCustomFields(productData) {
+  const fields = [];
+
+  if (productData.brand) {
+    fields.push({
+      name: 'Бренд',
+      value: productData.brand
+    });
+  }
+
+  if (productData.series) {
+    fields.push({
+      name: 'Серия',
+      value: productData.series
+    });
+  }
+
+  return fields;
+}
+
+
+/**
+ * ПОИСК ИЛИ СОЗДАНИЕ КАТЕГОРИЙ
+ */
+async function findOrCreateCategories(categoriesString) {
+  try {
+    if (!categoriesString) return [];
+
+    // Разбиваем по > или запятой
+    const categoryNames = categoriesString
+      .split(/[>,]/)
+      .map(c => c.trim())
+      .filter(c => c);
+
+    if (categoryNames.length === 0) return [];
+
+    // Загружаем существующие категории
+    const existingCategories = await loadCatalogStructure();
+
+    const categoryIds = [];
+
+    for (const categoryName of categoryNames) {
+      // Ищем существующую категорию
+      const existing = existingCategories.find(cat =>
+        cat.title.toLowerCase() === categoryName.toLowerCase()
+      );
+
+      if (existing) {
+        categoryIds.push(existing.id);
+      } else {
+        // Создаем новую категорию
+        logInfo(`🆕 Создаем новую категорию: ${categoryName}`);
+
+        const newCategory = await makeInsalesRequest(
+          'POST',
+          INSALES_ENDPOINTS.CATEGORIES,
+          {
+            category: {
+              title: categoryName,
+              position: 999
+            }
+          }
+        );
+
+        if (newCategory && newCategory.id) {
+          categoryIds.push(newCategory.id);
+        }
+      }
+    }
+
+    return categoryIds;
+
+  } catch (error) {
+    logError('Ошибка работы с категориями', error);
+    return [];
+  }
+}
+
+
+/**
+ * ЗАГРУЗКА ИЗОБРАЖЕНИЙ ТОВАРА
+ */
+async function uploadProductImages(productId, imagesString) {
+  try {
+    if (!imagesString) return;
+
+    const imageUrls = imagesString.split('\n').filter(url => url.trim().startsWith('http'));
+
+    if (imageUrls.length === 0) {
+      logInfo('📷 Нет изображений для загрузки');
+      return;
+    }
+
+    logInfo(`📷 Загружаем ${imageUrls.length} изображений`);
+
+    for (let i = 0; i < imageUrls.length; i++) {
+      const imageUrl = imageUrls[i].trim();
+
+      try {
+        const imagePayload = {
+          image: {
+            src: imageUrl,
+            position: i + 1
+          }
+        };
+
+        const endpoint = INSALES_ENDPOINTS.PRODUCT_IMAGES.replace('{product_id}', productId);
+
+        await makeInsalesRequest('POST', endpoint, imagePayload);
+
+        logInfo(`✅ Изображение ${i + 1}/${imageUrls.length} загружено`);
+
+        // Пауза между загрузками
+        if (i < imageUrls.length - 1) {
+          Utilities.sleep(1000);
+        }
+
+      } catch (imageError) {
+        logWarning(`⚠️ Ошибка загрузки изображения ${i + 1}: ${imageError.message}`);
+      }
+    }
+
+    logInfo(`✅ Загрузка изображений завершена`);
+
+  } catch (error) {
+    logError('Ошибка загрузки изображений', error);
+  }
+}
+
+
+/**
+ * ПАКЕТНОЕ СОЗДАНИЕ ТОВАРОВ ИЗ ТАБЛИЦЫ
+ */
+async function batchCreateProductsInInSales() {
+  try {
+    logInfo('🚀 Запуск пакетного создания товаров в InSales');
+
+    const products = readSelectedProducts();
+
+    if (products.length === 0) {
+      logWarning('⚠️ Нет отмеченных товаров для создания');
+      return;
+    }
+
+    logInfo(`📦 Создаем ${products.length} товаров`);
+
+    let successCount = 0;
+    let errorCount = 0;
+    let skippedCount = 0;
+
+    for (let i = 0; i < products.length; i++) {
+      const row = products[i];
+
+      try {
+        const article = row[IMAGES_COLUMNS.ARTICLE - 1];
+
+        if (!article) {
+          logWarning(`⚠️ Строка ${i + 1}: нет артикула, пропускаем`);
+          skippedCount++;
+          continue;
+        }
+
+        logInfo(`[${i + 1}/${products.length}] Создаем товар ${article}`);
+
+        // Проверяем статус сопоставления
+        const matchStatus = row[IMAGES_COLUMNS.MATCH_STATUS - 1];
+
+        if (matchStatus === MATCH_STATUS.EXACT_MATCH || matchStatus === MATCH_STATUS.DUPLICATE) {
+          logWarning(`⚠️ ${article}: товар уже существует (${matchStatus}), пропускаем`);
+          skippedCount++;
+          continue;
+        }
+
+        // Формируем данные товара
+        const productData = {
+          article: article,
+          productName: row[IMAGES_COLUMNS.PRODUCT_NAME - 1],
+          description: row[IMAGES_COLUMNS.DESCRIPTION - 1],
+          descriptionRewritten: row[IMAGES_COLUMNS.DESCRIPTION_REWRITTEN - 1],
+          shortDescription: row[IMAGES_COLUMNS.SHORT_DESCRIPTION - 1],
+          specificationsNormalized: row[IMAGES_COLUMNS.SPECIFICATIONS_NORMALIZED - 1],
+          price: row[IMAGES_COLUMNS.PRICE - 1],
+          stock: row[IMAGES_COLUMNS.STOCK - 1],
+          categories: row[IMAGES_COLUMNS.CATEGORIES - 1],
+          brand: row[IMAGES_COLUMNS.BRAND - 1],
+          series: row[IMAGES_COLUMNS.SERIES - 1],
+          weight: row[IMAGES_COLUMNS.WEIGHT - 1],
+          dimensions: row[IMAGES_COLUMNS.DIMENSIONS - 1],
+          packageContents: row[IMAGES_COLUMNS.PACKAGE_CONTENTS - 1],
+          supplierImages: row[IMAGES_COLUMNS.SUPPLIER_IMAGES - 1]
+        };
+
+        // Создаем товар
+        await createProductInInSales(productData);
+
+        logInfo(`✅ [${i + 1}/${products.length}] ${article}: товар создан`);
+        successCount++;
+
+        // Пауза между товарами
+        if (i < products.length - 1) {
+          Utilities.sleep(2000);
+        }
+
+      } catch (error) {
+        logError(`❌ [${i + 1}/${products.length}] Ошибка создания товара`, error);
+        errorCount++;
+      }
+    }
+
+    logInfo(`✅ Пакетное создание завершено: успешно ${successCount}, ошибок ${errorCount}, пропущено ${skippedCount}`);
+
+  } catch (error) {
+    handleError(error, 'Пакетное создание товаров');
+  }
+}
+
+
 // ========================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ========================================
