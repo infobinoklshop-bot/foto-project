@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <title>Управление параметрами</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      padding: 0;
+      margin: 0;
+      background: #f5f7fa;
+      color: #2c3e50;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ========================================
+       HEADER AND TABS
+       ======================================== */
+
+    .header {
+      background: #ffffff;
+      border-bottom: 2px solid #e1e8ed;
+      padding: 20px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .header h2 {
+      font-size: 20px;
+      color: #1976d2;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    .header .subtitle {
+      font-size: 13px;
+      color: #7f8c8d;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+      border-bottom: 2px solid #e1e8ed;
+    }
+
+    .tab {
+      padding: 10px 20px;
+      background: transparent;
+      border: none;
+      border-bottom: 3px solid transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #7f8c8d;
+      transition: all 0.2s;
+      position: relative;
+      bottom: -2px;
+    }
+
+    .tab:hover {
+      color: #1976d2;
+      background: #f8fafc;
+    }
+
+    .tab.active {
+      color: #1976d2;
+      border-bottom-color: #1976d2;
+      background: #f8fafc;
+    }
+
+    /* ========================================
+       TAB CONTENT CONTAINER
+       ======================================== */
+
+    .tab-content {
+      display: none;
+      padding: 24px;
+      background: #f5f7fa;
+      min-height: 500px;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+    }
+
+    .tab-content.active {
+      display: block;
+      animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* ========================================
+       LOADING STATE
+       ======================================== */
+
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      background: #ffffff;
+      border-radius: 8px;
+      margin: 20px;
+    }
+
+    .spinner {
+      border: 4px solid #e1e8ed;
+      border-top: 4px solid #1976d2;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      color: #7f8c8d;
+      font-size: 14px;
+    }
+
+    /* ========================================
+       INFO BOXES
+       ======================================== */
+
+    .info-box {
+      background: #e3f2fd;
+      border-left: 4px solid #1976d2;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #1565c0;
+    }
+
+    .info-box strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .warning-box {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #856404;
+    }
+
+    .warning-box strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .error-box {
+      background: #f8d7da;
+      border-left: 4px solid #dc3545;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #721c24;
+    }
+
+    .success-box {
+      background: #d4edda;
+      border-left: 4px solid #28a745;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #155724;
+    }
+
+    /* ========================================
+       PRODUCT INFO CARD
+       ======================================== */
+
+    .product-card {
+      background: #ffffff;
+      border: 1px solid #e1e8ed;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .product-card h3 {
+      font-size: 16px;
+      color: #2c3e50;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    .product-info-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .product-info-row .label {
+      font-weight: 600;
+      color: #7f8c8d;
+      min-width: 100px;
+    }
+
+    .product-info-row .value {
+      color: #2c3e50;
+      flex: 1;
+    }
+
+    /* ========================================
+       SECTIONS (COLLAPSIBLE)
+       ======================================== */
+
+    .section {
+      background: #ffffff;
+      border: 1px solid #e1e8ed;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .section-header {
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-bottom: 1px solid #e1e8ed;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.2s;
+    }
+
+    .section-header:hover {
+      background: #ecf0f1;
+    }
+
+    .section-header h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #2c3e50;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-header .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    .badge-success {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .badge-warning {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .badge-info {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .chevron {
+      transition: transform 0.3s;
+      font-size: 18px;
+      color: #7f8c8d;
+    }
+
+    .section-header.collapsed .chevron {
+      transform: rotate(-90deg);
+    }
+
+    .section-content {
+      padding: 16px;
+      display: block;
+    }
+
+    .section-content.collapsed {
+      display: none;
+    }
+
+    /* ========================================
+       PARAMETER ROWS (TAB 1)
+       ======================================== */
+
+    .parameter-row {
+      display: grid;
+      grid-template-columns: 2fr 1.5fr 50px 2fr 2fr;
+      gap: 12px;
+      align-items: center;
+      padding: 12px;
+      background: #ffffff;
+      border: 2px solid #e1e8ed;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      transition: all 0.2s;
+    }
+
+    .parameter-row.matched {
+      border-color: #28a745;
+      background: #f1f9f3;
+    }
+
+    .parameter-row.unmapped {
+      border-color: #dc3545;
+      background: #fef5f5;
+    }
+
+    .parameter-row:hover {
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .param-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .param-field .label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #7f8c8d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .param-field .value {
+      font-size: 13px;
+      color: #2c3e50;
+      padding: 8px 10px;
+      background: #f8fafc;
+      border: 1px solid #e1e8ed;
+      border-radius: 4px;
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+    }
+
+    .param-field input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #e1e8ed;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #2c3e50;
+      background: #ffffff;
+      transition: all 0.2s;
+    }
+
+    .param-field input:focus {
+      outline: none;
+      border-color: #1976d2;
+      box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+    }
+
+    .arrow {
+      color: #95a5a6;
+      font-size: 20px;
+      text-align: center;
+    }
+
+    /* ========================================
+       VALUE ITEMS (TAB 2)
+       ======================================== */
+
+    .value-item {
+      background: #ffffff;
+      border: 2px solid #e1e8ed;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      transition: all 0.2s;
+    }
+
+    .value-item:hover {
+      border-color: #cbd5e0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .value-item.processed {
+      opacity: 0.6;
+      background: #f8fafc;
+    }
+
+    .value-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .parameter-name {
+      font-weight: 600;
+      color: #2c3e50;
+      font-size: 15px;
+    }
+
+    .value-info {
+      margin: 10px 0;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-left: 3px solid #e1e8ed;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .value-info .label {
+      font-weight: 600;
+      color: #7f8c8d;
+      margin-right: 8px;
+    }
+
+    .raw-value {
+      color: #dc3545;
+      font-weight: 600;
+      background: #fef5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .allowed-values {
+      color: #28a745;
+      font-size: 12px;
+      margin-top: 6px;
+      background: #f1f9f3;
+      padding: 6px 8px;
+      border-radius: 3px;
+    }
+
+    .affected-articles {
+      font-size: 12px;
+      color: #7f8c8d;
+      margin-top: 6px;
+    }
+
+    /* ========================================
+       ACTION MODES (TAB 2)
+       ======================================== */
+
+    .action-modes {
+      margin: 12px 0;
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 6px;
+      border: 1px solid #e1e8ed;
+    }
+
+    .action-modes label {
+      display: block;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+      font-size: 13px;
+    }
+
+    .action-modes label:hover {
+      background: #ffffff;
+    }
+
+    .action-modes input[type="radio"] {
+      margin-right: 8px;
+    }
+
+    .action-modes label.selected {
+      background: #e3f2fd;
+      border: 1px solid #1976d2;
+      color: #1565c0;
+      font-weight: 500;
+    }
+
+    .action-content {
+      margin-top: 12px;
+      padding: 12px;
+      background: #ffffff;
+      border-radius: 4px;
+      display: none;
+    }
+
+    .action-content.active {
+      display: block;
+    }
+
+    /* ========================================
+       AUTOCOMPLETE
+       ======================================== */
+
+    .autocomplete-wrapper {
+      position: relative;
+    }
+
+    .autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #ffffff;
+      border: 1px solid #e1e8ed;
+      border-top: none;
+      border-radius: 0 0 4px 4px;
+      max-height: 240px;
+      overflow-y: auto;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      display: none;
+    }
+
+    .autocomplete-dropdown.show {
+      display: block;
+    }
+
+    .autocomplete-item {
+      padding: 10px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #2c3e50;
+      border-bottom: 1px solid #f8fafc;
+      transition: background 0.15s;
+    }
+
+    .autocomplete-item:hover,
+    .autocomplete-item.selected {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .autocomplete-item:last-child {
+      border-bottom: none;
+    }
+
+    .autocomplete-item mark {
+      background: #fff3cd;
+      color: #856404;
+      font-weight: 600;
+      padding: 1px 2px;
+    }
+
+    /* ========================================
+       BUTTONS
+       ======================================== */
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 2px solid #e1e8ed;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.12);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .btn-primary {
+      background: #1976d2;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1565c0;
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #218838;
+    }
+
+    .btn-warning {
+      background: #ffc107;
+      color: #212529;
+    }
+
+    .btn-warning:hover {
+      background: #e0a800;
+    }
+
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #5a6268;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    /* ========================================
+       SEARCH INPUT
+       ======================================== */
+
+    .search-box {
+      margin-bottom: 20px;
+    }
+
+    .search-box input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e1e8ed;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .search-box input:focus {
+      outline: none;
+      border-color: #1976d2;
+      box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+    }
+
+    /* ========================================
+       SCROLLBAR STYLING
+       ======================================== */
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f8fafc;
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e0;
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #a0aec0;
+    }
+
+    /* ========================================
+       EMPTY STATE
+       ======================================== */
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #7f8c8d;
+    }
+
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+      opacity: 0.3;
+    }
+
+    .empty-state h3 {
+      font-size: 18px;
+      margin-bottom: 8px;
+      color: #2c3e50;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    /* ========================================
+       FOOTER
+       ======================================== */
+
+    .dialog-footer {
+      background: #ffffff;
+      border-top: 2px solid #e1e8ed;
+      padding: 16px 24px;
+      position: sticky;
+      bottom: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 -2px 4px rgba(0,0,0,0.05);
+    }
+
+    .footer-info {
+      font-size: 13px;
+      color: #7f8c8d;
+    }
+
+  </style>
+</head>
+
+<body>
+  <!-- Header with tabs -->
+  <div class="header">
+    <p class="subtitle">Сопоставление параметров товаров со справочником</p>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('product')">
+        📦 Товар
+      </button>
+      <button class="tab" onclick="switchTab('unnormalized')">
+        📋 Все ненормализованные значения
+      </button>
+    </div>
+  </div>
+
+  <!-- Tab 1: Product Parameter Mapping -->
+  <div id="productTab" class="tab-content active">
+    <div id="productLoading" class="loading-container">
+      <div class="spinner"></div>
+      <div class="loading-text">Загрузка данных товара...</div>
+    </div>
+
+    <div id="productContent" style="display: none;">
+      <!-- Product Info -->
+      <div class="product-card">
+        <h3>Информация о товаре</h3>
+        <div class="product-info-row">
+          <span class="label">Артикул:</span>
+          <span class="value" id="product-article">—</span>
+        </div>
+        <div class="product-info-row">
+          <span class="label">Название:</span>
+          <span class="value" id="product-name">—</span>
+        </div>
+        <div class="product-info-row">
+          <span class="label">Поставщик:</span>
+          <span class="value" id="product-supplier">—</span>
+        </div>
+      </div>
+
+      <!-- Matched Parameters Section -->
+      <div class="section">
+        <div class="section-header collapsed" onclick="toggleSection(this)">
+          <h3>
+            ✅ Сопоставленные параметры
+            <span class="badge badge-success" id="matched-count">0</span>
+          </h3>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="section-content collapsed" id="matched-container">
+          <!-- Matched parameters will be rendered here -->
+        </div>
+      </div>
+
+      <!-- Unmapped Parameters Section -->
+      <div class="section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <h3>
+            ⚠️ Несопоставленные параметры
+            <span class="badge badge-warning" id="unmapped-count">0</span>
+          </h3>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="section-content" id="unmapped-container">
+          <!-- Unmapped parameters will be rendered here -->
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button class="btn btn-primary" onclick="handleUpdateProduct()">
+          🔄 Обновить товар
+        </button>
+        <button class="btn btn-success" onclick="handleUpdateDictionary()">
+          📖 Обновить справочник
+        </button>
+        <button class="btn btn-secondary" onclick="google.script.host.close()">
+          ❌ Закрыть
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2: All Unnormalized Values -->
+  <div id="unnormalizedTab" class="tab-content">
+    <div id="unnormalizedLoading" class="loading-container">
+      <div class="spinner"></div>
+      <div class="loading-text">Загрузка ненормализованных значений...</div>
+    </div>
+
+    <div id="unnormalizedContent" style="display: none;">
+      <div class="info-box">
+        <strong>💡 Инструкция:</strong>
+        Для каждого ненормализованного значения выберите действие: добавить в список допустимых,
+        сопоставить с существующим значением или переназначить параметр.
+      </div>
+
+      <!-- Search -->
+      <div class="search-box">
+        <input type="text" id="unnormalized-search" placeholder="🔍 Поиск по названию параметра..."
+               oninput="filterUnnormalizedValues(this.value)">
+      </div>
+
+      <!-- Values List -->
+      <div id="unnormalized-list">
+        <!-- Unnormalized values will be rendered here -->
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button class="btn btn-success" onclick="applyAllChanges()">
+          ✅ Применить все изменения
+        </button>
+        <button class="btn btn-secondary" onclick="google.script.host.close()">
+          ❌ Закрыть
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="dialog-footer">
+    <div class="footer-info">
+      <span id="footer-message">Выберите вкладку для работы</span>
+    </div>
+    <div>
+      <button class="btn btn-sm btn-secondary" onclick="google.script.host.close()">
+        Закрыть
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ========================================
+    // GLOBAL STATE
+    // ========================================
+
+    let currentTab = 'product';
+    let productData = null;
+    let unnormalizedValues = [];
+    let allParameters = [];
+    let productMappings = [];
+    let unnormalizedChanges = [];
+    let activeDropdownIndex = -1;
+
+    // ========================================
+    // INITIALIZATION
+    // ========================================
+
+    window.onload = function() {
+      loadAllData();
+    };
+
+    function loadAllData() {
+      // Get article from URL parameter or selected product
+      const urlParams = new URLSearchParams(window.location.search);
+      const article = urlParams.get('article');
+
+      // Load data for both tabs in parallel
+      Promise.all([
+        loadProductData(article),
+        loadUnnormalizedData(),
+        loadParametersList()
+      ]).then(() => {
+        console.log('✅ All data loaded');
+      }).catch(error => {
+        console.error('❌ Error loading data:', error);
+        showError('Ошибка загрузки данных: ' + error.message);
+      });
+    }
+
+    function loadProductData(article) {
+      return new Promise((resolve, reject) => {
+        if (!article) {
+          document.getElementById('productLoading').innerHTML = `
+            <div class="error-box">
+              <strong>⚠️ Товар не выбран</strong>
+              Пожалуйста, выберите товар с помощью чекбокса в таблице и откройте диалог снова.
+            </div>
+          `;
+          reject(new Error('No article specified'));
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(data => {
+            if (data.success) {
+              productData = data;
+              renderProductTab(data);
+              document.getElementById('productLoading').style.display = 'none';
+              document.getElementById('productContent').style.display = 'block';
+              resolve();
+            } else {
+              document.getElementById('productLoading').innerHTML = `
+                <div class="error-box">
+                  <strong>❌ Ошибка:</strong> ${data.error}
+                </div>
+              `;
+              reject(new Error(data.error));
+            }
+          })
+          .withFailureHandler(error => {
+            document.getElementById('productLoading').innerHTML = `
+              <div class="error-box">
+                <strong>❌ Ошибка загрузки:</strong> ${error.message}
+              </div>
+            `;
+            reject(error);
+          })
+          .getParameterMappingData(article);
+      });
+    }
+
+    function loadUnnormalizedData() {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(data => {
+            unnormalizedValues = data || [];
+            renderUnnormalizedTab();
+            document.getElementById('unnormalizedLoading').style.display = 'none';
+            document.getElementById('unnormalizedContent').style.display = 'block';
+            resolve();
+          })
+          .withFailureHandler(error => {
+            document.getElementById('unnormalizedLoading').innerHTML = `
+              <div class="error-box">
+                <strong>❌ Ошибка загрузки:</strong> ${error.message}
+              </div>
+            `;
+            reject(error);
+          })
+          .getUnnormalizedValues();
+      });
+    }
+
+    function loadParametersList() {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(data => {
+            allParameters = data || [];
+            console.log(`✅ Loaded ${allParameters.length} parameters`);
+            resolve();
+          })
+          .withFailureHandler(error => {
+            console.error('❌ Error loading parameters:', error);
+            reject(error);
+          })
+          .getAllParameterNames();
+      });
+    }
+
+    // ========================================
+    // TAB SWITCHING
+    // ========================================
+
+    function switchTab(tabName) {
+      currentTab = tabName;
+
+      // Update tab buttons
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      event.target.classList.add('active');
+
+      // Update tab content
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+
+      if (tabName === 'product') {
+        document.getElementById('productTab').classList.add('active');
+        updateFooterMessage('Режим: сопоставление параметров товара');
+      } else {
+        document.getElementById('unnormalizedTab').classList.add('active');
+        updateFooterMessage('Режим: пакетная обработка ненормализованных значений');
+      }
+    }
+
+    function updateFooterMessage(message) {
+      document.getElementById('footer-message').textContent = message;
+    }
+
+    // ========================================
+    // RENDER TAB 1: PRODUCT PARAMETERS
+    // ========================================
+
+    function renderProductTab(data) {
+      // Update product info
+      document.getElementById('product-article').textContent = data.article;
+      document.getElementById('product-name').textContent = data.productName;
+      document.getElementById('product-supplier').textContent = data.supplier.toUpperCase();
+
+      // Update counts
+      document.getElementById('matched-count').textContent = data.matched.length;
+      document.getElementById('unmapped-count').textContent = data.unmapped.length;
+
+      // Render matched parameters
+      const matchedContainer = document.getElementById('matched-container');
+      if (data.matched.length === 0) {
+        matchedContainer.innerHTML = `
+          <div class="empty-state">
+            <p>Нет сопоставленных параметров</p>
+          </div>
+        `;
+      } else {
+        matchedContainer.innerHTML = data.matched.map(param => `
+          <div class="parameter-row matched">
+            <div class="param-field">
+              <span class="label">Поле поставщика</span>
+              <div class="value">${escapeHtml(param.supplierFieldName || '—')}</div>
+            </div>
+            <div class="param-field">
+              <span class="label">Исходное значение</span>
+              <div class="value" style="background: #fff3cd; border: 1px solid #ffc107; padding: 8px; border-radius: 4px;">${escapeHtml(param.supplierValue || '—')}</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="param-field">
+              <span class="label">Параметр справочника</span>
+              <div class="value">${escapeHtml(param.dictionaryParam)}</div>
+            </div>
+            <div class="param-field">
+              <span class="label">Нормализованное значение</span>
+              <div class="value" style="background: #d4edda; border: 1px solid #28a745; padding: 8px; border-radius: 4px;">${escapeHtml(param.normalizedValue)}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Render unmapped parameters
+      const unmappedContainer = document.getElementById('unmapped-container');
+      if (data.unmapped.length === 0) {
+        unmappedContainer.innerHTML = `
+          <div class="success-box">
+            <strong>✅ Отлично!</strong> Все параметры сопоставлены.
+          </div>
+        `;
+      } else {
+        unmappedContainer.innerHTML = data.unmapped.map((param, index) => `
+          <div class="parameter-row unmapped" data-index="${index}">
+            <div class="param-field">
+              <span class="label">Поле поставщика</span>
+              <div class="value">${escapeHtml(param.supplierFieldName)}: ${escapeHtml(param.supplierValue)}</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="param-field autocomplete-wrapper">
+              <span class="label">Сопоставить с параметром</span>
+              <input type="text"
+                     placeholder="Начните вводить название параметра..."
+                     data-index="${index}"
+                     oninput="handleAutocomplete(this, ${index})"
+                     onfocus="handleAutocomplete(this, ${index})"
+                     onblur="hideAutocomplete(${index})">
+              <div class="autocomplete-dropdown" id="autocomplete-${index}"></div>
+            </div>
+            <div class="param-field">
+              <span class="label">Действие</span>
+              <button class="btn btn-sm btn-primary" onclick="addSynonymMapping(${index})">
+                Добавить синоним
+              </button>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    // ========================================
+    // RENDER TAB 2: UNNORMALIZED VALUES
+    // ========================================
+
+    function renderUnnormalizedTab() {
+      const container = document.getElementById('unnormalized-list');
+
+      if (unnormalizedValues.length === 0) {
+        container.innerHTML = `
+          <div class="success-box">
+            <strong>✅ Отлично!</strong> Нет ненормализованных значений.
+            Все enum значения из последнего импорта соответствуют справочнику.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = unnormalizedValues.map((item, index) => {
+        const articles = Array.isArray(item.articles) ? item.articles.join(', ') : '';
+
+        return `
+          <div class="value-item" data-index="${index}" id="value-item-${index}">
+            <div class="value-header">
+              <div class="parameter-name">${escapeHtml(item.parameter)}</div>
+              <span class="badge badge-info" id="status-${index}">Не обработано</span>
+            </div>
+
+            <div class="value-info">
+              <span class="label">Сырое значение:</span>
+              <span class="raw-value">${escapeHtml(item.value)}</span>
+            </div>
+
+            <div class="value-info">
+              <span class="label">Допустимые значения:</span>
+              <div class="allowed-values">${escapeHtml(item.allowedValues || 'Не указаны')}</div>
+            </div>
+
+            ${articles ? `
+              <div class="affected-articles">
+                <span class="label">Затронутые товары:</span> ${escapeHtml(articles)}
+              </div>
+            ` : ''}
+
+            <div class="action-modes">
+              <label onclick="selectActionMode(${index}, 'add')">
+                <input type="radio" name="action-${index}" value="add">
+                <strong>Добавить новое значение</strong> - добавить "${escapeHtml(item.value)}" в список допустимых
+              </label>
+
+              <label onclick="selectActionMode(${index}, 'select')">
+                <input type="radio" name="action-${index}" value="select">
+                <strong>Выбрать существующее</strong> - сопоставить с одним из допустимых значений
+              </label>
+
+              <label onclick="selectActionMode(${index}, 'remap')">
+                <input type="radio" name="action-${index}" value="remap">
+                <strong>Переназначить параметр</strong> - сопоставить с другим параметром справочника
+              </label>
+            </div>
+
+            <!-- Action content for 'select' mode -->
+            <div class="action-content" id="action-select-${index}">
+              <label>Выберите существующее значение:</label>
+              <select class="param-field value" style="width: 100%; padding: 8px;">
+                ${(item.allowedValues || '').split(';').map(v =>
+                  `<option value="${escapeHtml(v.trim())}">${escapeHtml(v.trim())}</option>`
+                ).join('')}
+              </select>
+            </div>
+
+            <!-- Action content for 'remap' mode -->
+            <div class="action-content autocomplete-wrapper" id="action-remap-${index}">
+              <label>Выберите другой параметр:</label>
+              <input type="text"
+                     class="param-field value"
+                     placeholder="Начните вводить название параметра..."
+                     oninput="handleUnnormalizedAutocomplete(this, ${index})"
+                     onfocus="handleUnnormalizedAutocomplete(this, ${index})">
+              <div class="autocomplete-dropdown" id="unnormalized-autocomplete-${index}"></div>
+            </div>
+
+            <div style="margin-top: 12px;">
+              <button class="btn btn-sm btn-success" onclick="applyUnnormalizedChange(${index})" id="apply-btn-${index}">
+                Применить
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="skipUnnormalizedValue(${index})">
+                Пропустить
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function selectActionMode(index, mode) {
+      // Hide all action contents for this item
+      ['add', 'select', 'remap'].forEach(m => {
+        const content = document.getElementById(`action-${m}-${index}`);
+        if (content) {
+          content.classList.remove('active');
+        }
+      });
+
+      // Show selected action content
+      if (mode !== 'add') {
+        const content = document.getElementById(`action-${mode}-${index}`);
+        if (content) {
+          content.classList.add('active');
+        }
+      }
+
+      // Update label styling
+      const labels = document.querySelectorAll(`input[name="action-${index}"]`).forEach(radio => {
+        radio.parentElement.classList.remove('selected');
+      });
+      event.target.closest('label').classList.add('selected');
+    }
+
+    // ========================================
+    // AUTOCOMPLETE FUNCTIONALITY
+    // ========================================
+
+    function handleAutocomplete(input, index) {
+      const query = input.value.toLowerCase();
+      const dropdown = document.getElementById(`autocomplete-${index}`);
+
+      if (!query || query.length < 2) {
+        dropdown.classList.remove('show');
+        return;
+      }
+
+      // Filter parameters
+      const filtered = allParameters.filter(param =>
+        param.toLowerCase().includes(query)
+      ).slice(0, 10);
+
+      if (filtered.length === 0) {
+        dropdown.innerHTML = '<div class="autocomplete-item">Нет совпадений</div>';
+        dropdown.classList.add('show');
+        return;
+      }
+
+      // Render dropdown
+      dropdown.innerHTML = filtered.map(param => {
+        const highlighted = param.replace(
+          new RegExp(query, 'gi'),
+          match => `<mark>${match}</mark>`
+        );
+        return `<div class="autocomplete-item" onclick="selectParameter(${index}, '${escapeHtml(param)}')">${highlighted}</div>`;
+      }).join('');
+
+      dropdown.classList.add('show');
+      activeDropdownIndex = index;
+    }
+
+    function handleUnnormalizedAutocomplete(input, index) {
+      const query = input.value.toLowerCase();
+      const dropdown = document.getElementById(`unnormalized-autocomplete-${index}`);
+
+      if (!query || query.length < 2) {
+        dropdown.classList.remove('show');
+        return;
+      }
+
+      const filtered = allParameters.filter(param =>
+        param.toLowerCase().includes(query)
+      ).slice(0, 10);
+
+      if (filtered.length === 0) {
+        dropdown.innerHTML = '<div class="autocomplete-item">Нет совпадений</div>';
+        dropdown.classList.add('show');
+        return;
+      }
+
+      dropdown.innerHTML = filtered.map(param => {
+        const highlighted = param.replace(
+          new RegExp(query, 'gi'),
+          match => `<mark>${match}</mark>`
+        );
+        return `<div class="autocomplete-item" onclick="selectUnnormalizedParameter(${index}, '${escapeHtml(param)}')">${highlighted}</div>`;
+      }).join('');
+
+      dropdown.classList.add('show');
+    }
+
+    function selectParameter(index, paramName) {
+      const input = document.querySelector(`input[data-index="${index}"]`);
+      if (input) {
+        input.value = paramName;
+        hideAutocomplete(index);
+      }
+    }
+
+    function selectUnnormalizedParameter(index, paramName) {
+      const input = document.querySelector(`#action-remap-${index} input`);
+      if (input) {
+        input.value = paramName;
+        document.getElementById(`unnormalized-autocomplete-${index}`).classList.remove('show');
+      }
+    }
+
+    function hideAutocomplete(index) {
+      setTimeout(() => {
+        const dropdown = document.getElementById(`autocomplete-${index}`);
+        if (dropdown) {
+          dropdown.classList.remove('show');
+        }
+      }, 200);
+    }
+
+    // ========================================
+    // TAB 1 ACTIONS
+    // ========================================
+
+    function addSynonymMapping(index) {
+      if (!productData || !productData.unmapped) return;
+
+      const unmapped = productData.unmapped[index];
+      const input = document.querySelector(`input[data-index="${index}"]`);
+      const selectedParam = input ? input.value.trim() : '';
+
+      if (!selectedParam) {
+        alert('Пожалуйста, выберите параметр из справочника');
+        return;
+      }
+
+      // Add to mappings array
+      productMappings.push({
+        action: 'addSynonym',
+        supplierFieldName: unmapped.supplierFieldName,
+        dictionaryParam: selectedParam,
+        supplier: productData.supplier
+      });
+
+      // Visual feedback
+      const row = document.querySelector(`.parameter-row[data-index="${index}"]`);
+      if (row) {
+        row.classList.remove('unmapped');
+        row.classList.add('matched');
+        row.innerHTML = `
+          <div class="param-field">
+            <span class="label">Поле поставщика</span>
+            <div class="value">${escapeHtml(unmapped.supplierFieldName)}</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="param-field">
+            <span class="label">Параметр справочника</span>
+            <div class="value">${escapeHtml(selectedParam)}</div>
+          </div>
+          <div class="param-field">
+            <div class="success-box">✅ Сопоставлено</div>
+          </div>
+        `;
+      }
+
+      updateFooterMessage(`Добавлено сопоставлений: ${productMappings.length}`);
+    }
+
+    function handleUpdateProduct() {
+      if (productMappings.length === 0) {
+        alert('Нет изменений для применения');
+        return;
+      }
+
+      if (!confirm(`Применить ${productMappings.length} изменений к товару "${productData.article}"?`)) {
+        return;
+      }
+
+      document.getElementById('productContent').innerHTML = `
+        <div class="loading-container">
+          <div class="spinner"></div>
+          <div class="loading-text">Обновление товара...</div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(result => {
+          if (result.success) {
+            alert(`✅ Товар успешно обновлен!\n\nОбработано параметров: ${productMappings.length}`);
+            google.script.host.close();
+          } else {
+            alert(`❌ Ошибка: ${result.error}`);
+            loadProductData(productData.article);
+          }
+        })
+        .withFailureHandler(error => {
+          alert(`❌ Ошибка: ${error.message}`);
+          loadProductData(productData.article);
+        })
+        .applyLocalMappings(productData.article, productMappings);
+    }
+
+    function handleUpdateDictionary() {
+      if (productMappings.length === 0) {
+        alert('Нет изменений для применения');
+        return;
+      }
+
+      if (!confirm(
+        `⚠️ ВНИМАНИЕ!\n\n` +
+        `Это действие обновит справочник параметров и ре-нормализует ВСЕ товары в таблице.\n\n` +
+        `Изменений: ${productMappings.length}\n\n` +
+        `Процесс может занять несколько минут.\n\n` +
+        `Продолжить?`
+      )) {
+        return;
+      }
+
+      document.getElementById('productContent').innerHTML = `
+        <div class="loading-container">
+          <div class="spinner"></div>
+          <div class="loading-text">Обновление справочника и ре-нормализация товаров...</div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(result => {
+          if (result.success) {
+            alert(`✅ Справочник успешно обновлен!\n\nОбработано параметров: ${productMappings.length}\nРе-нормализовано товаров: ${result.productsUpdated || 'все'}`);
+            google.script.host.close();
+          } else {
+            alert(`❌ Ошибка: ${result.error}`);
+            loadProductData(productData.article);
+          }
+        })
+        .withFailureHandler(error => {
+          alert(`❌ Ошибка: ${error.message}`);
+          loadProductData(productData.article);
+        })
+        .applyGlobalMappings(productMappings);
+    }
+
+    // ========================================
+    // TAB 2 ACTIONS
+    // ========================================
+
+    function applyUnnormalizedChange(index) {
+      const item = unnormalizedValues[index];
+      const selectedMode = document.querySelector(`input[name="action-${index}"]:checked`);
+
+      if (!selectedMode) {
+        alert('Пожалуйста, выберите действие');
+        return;
+      }
+
+      const mode = selectedMode.value;
+      let change = {
+        parameter: item.parameter,
+        oldValue: item.value,
+        action: mode
+      };
+
+      if (mode === 'add') {
+        change.newValue = item.value;
+      } else if (mode === 'select') {
+        const select = document.querySelector(`#action-select-${index} select`);
+        change.newValue = select ? select.value : '';
+      } else if (mode === 'remap') {
+        const input = document.querySelector(`#action-remap-${index} input`);
+        change.newParameter = input ? input.value.trim() : '';
+
+        if (!change.newParameter) {
+          alert('Пожалуйста, выберите параметр');
+          return;
+        }
+      }
+
+      // Add to changes array
+      unnormalizedChanges.push(change);
+
+      // Mark as processed
+      const valueItem = document.getElementById(`value-item-${index}`);
+      if (valueItem) {
+        valueItem.classList.add('processed');
+      }
+
+      const statusBadge = document.getElementById(`status-${index}`);
+      if (statusBadge) {
+        statusBadge.textContent = '✅ Обработано';
+        statusBadge.className = 'badge badge-success';
+      }
+
+      const applyBtn = document.getElementById(`apply-btn-${index}`);
+      if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = '✅ Применено';
+      }
+
+      updateFooterMessage(`Обработано значений: ${unnormalizedChanges.length} из ${unnormalizedValues.length}`);
+    }
+
+    function skipUnnormalizedValue(index) {
+      const valueItem = document.getElementById(`value-item-${index}`);
+      if (valueItem) {
+        valueItem.style.opacity = '0.3';
+      }
+
+      const statusBadge = document.getElementById(`status-${index}`);
+      if (statusBadge) {
+        statusBadge.textContent = 'Пропущено';
+        statusBadge.className = 'badge badge-secondary';
+      }
+    }
+
+    function applyAllChanges() {
+      if (unnormalizedChanges.length === 0) {
+        alert('Нет изменений для применения. Выберите действия для значений.');
+        return;
+      }
+
+      if (!confirm(`Применить ${unnormalizedChanges.length} изменений и ре-нормализовать затронутые товары?`)) {
+        return;
+      }
+
+      document.getElementById('unnormalizedContent').innerHTML = `
+        <div class="loading-container">
+          <div class="spinner"></div>
+          <div class="loading-text">Применение изменений и ре-нормализация товаров...</div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(result => {
+          if (result.success) {
+            alert(`✅ Изменения успешно применены!\n\nОбработано: ${unnormalizedChanges.length}\nРе-нормализовано товаров: ${result.productsUpdated || 0}`);
+            google.script.host.close();
+          } else {
+            alert(`❌ Ошибка: ${result.error}`);
+            loadUnnormalizedData();
+          }
+        })
+        .withFailureHandler(error => {
+          alert(`❌ Ошибка: ${error.message}`);
+          loadUnnormalizedData();
+        })
+        .applyUnnormalizedValuesChanges(unnormalizedChanges);
+    }
+
+    function filterUnnormalizedValues(query) {
+      const items = document.querySelectorAll('.value-item');
+      const lowerQuery = query.toLowerCase();
+
+      items.forEach(item => {
+        const paramName = item.querySelector('.parameter-name').textContent.toLowerCase();
+        if (paramName.includes(lowerQuery)) {
+          item.style.display = 'block';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    // ========================================
+    // UTILITY FUNCTIONS
+    // ========================================
+
+    function toggleSection(header) {
+      header.classList.toggle('collapsed');
+      const content = header.nextElementSibling;
+      content.classList.toggle('collapsed');
+    }
+
+    function escapeHtml(text) {
+      if (typeof text !== 'string') return text;
+      const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+      return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function showError(message) {
+      alert('❌ ' + message);
+    }
+
+  </script>
+</body>
+</html>
