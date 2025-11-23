@@ -1,0 +1,22 @@
+# Ignore hidden files
+.*
+!appsscript.json
+
+# Ignore libraries and dependencies
+.gemini_libs/**
+**/.gemini_libs/**
+**/emscripten_fetch_worker.js
+node_modules/
+
+# Ignore local scripts and tools
+*.py
+reproduce_*.js
+test_*.js
+verify_*.js
+analyze_*.js
+check_*.js
+
+# Ignore documentation and artifacts
+*.md
+memory-bank-context/
+data/

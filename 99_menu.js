@@ -37,6 +37,7 @@ function onOpen() {
 
      // НОВЫЙ ФУНКЦИОНАЛ: Импорт полных карточек
      .addItem('🆕 Импорт товаров от поставщиков', 'showFullProductImportDialog')
+     .addItem('📤 Создать товары в InSales', 'createProductsInInsalesMenu')
      .addSeparator()
 
      .addItem('🤖 Обработать изображения', 'showImageSelectionForProcessing')
@@ -52,7 +53,11 @@ function onOpen() {
    // ========================================
      .addItem('⚙️ Проверить настройки API', 'validateConfig')
      .addItem('🔄 Обновить товары из InSales', 'updateProductsFromInSales')
+     .addItem('📋 Обновить структуру таблицы', 'updateSheetStructure')
      .addItem('🧹 Очистить статусы обработки', 'clearProcessingStatuses')
+     .addSeparator()
+     .addItem('📖 Управление справочником параметров', 'showSpecificationReferenceMenu')
+     .addItem('🔄 Управление параметрами', 'showUnifiedParameterDialog')
      .addSeparator()
      .addItem('🆘 Справка', 'showHelpDialog')
      .addToUi();
@@ -1419,6 +1424,10 @@ function executeFullProductImport(articles, supplier) {
   try {
     logInfo(`🚀 Полный импорт ${articles.length} товаров от ${supplier}`);
 
+    // ✅ ИСПРАВЛЕНИЕ: Очищаем список ненормализованных значений в начале импорта
+    // Это предотвращает накопление значений из предыдущих импортов
+    clearUnnormalizedValues();
+
     let successCount = 0;
     let errorCount = 0;
     const errors = [];
@@ -1443,9 +1452,12 @@ function executeFullProductImport(articles, supplier) {
           throw new Error('Не удалось спарсить товар');
         }
 
+        // ✅ Отладочное логирование
+        logInfo(`   📊 Спарсенные данные: Цена="${productData.price}", Остаток="${productData.stock}"`);
+
         // 2. Нормализация характеристик
         const specsRaw = JSON.parse(productData.specifications || '{}');
-        const normalized = normalizeSpecifications(specsRaw, supplier);
+        const normalized = normalizeSpecifications(specsRaw, supplier, article);  // ✅ ИСПРАВЛЕНИЕ: Передаем артикул для связи с ненормализованными значениями
 
         // 3. AI-рерайт описания
         const aiResult = generateProductDescription({
@@ -1461,19 +1473,30 @@ function executeFullProductImport(articles, supplier) {
         const matchResult = checkProductDuplicate(article, productData.title);
 
         // 5. Запись в таблицу
+        const supplierImages = Array.isArray(productData.images)
+          ? productData.images.join('\n')
+          : (productData.images || '');
+
+        // ✅ Преобразуем остаток: "В наличии" → 5, остальное → 0
+        const stockQuantity = (productData.stock && productData.stock.toLowerCase().includes('наличии')) ? 5 : 0;
+
+        // ✅ ИСПРАВЛЕНИЕ: Синхронизация порядка параметров в колонках P и Q
+        // Используем новую функцию formatRawSpecsInNormalizedOrder для упорядочивания сырых данных
+        const normalizedOrder = normalized.normalized;  // Нормализованные параметры
+
         writeFullProductData({
           article: article,
           productName: productData.title,
           description: productData.description,
           descriptionRewritten: aiResult.rewrittenDescription,
           shortDescription: aiResult.shortDescription,
-          specificationsRaw: productData.specifications,
-          specificationsNormalized: JSON.stringify(normalized.normalized),
+          specificationsRaw: formatRawSpecsInNormalizedOrder(specsRaw, normalizedOrder, supplier),  // ✅ НОВАЯ функция для синхронизации
+          specificationsNormalized: JSON.stringify(normalizedOrder),                                 // ✅ ИСПРАВЛЕНО: JSON вместо текстового формата
           price: productData.price,
-          stock: productData.stock,
+          stock: stockQuantity,  // ✅ Числовое значение остатка
           categories: productData.categories,
           brand: productData.brand,
-          supplierImages: productData.images.join('\n'),
+          supplierImages: supplierImages,
           matchStatus: matchResult.matchStatus,
           matchConfidence: matchResult.confidence,
           importStatus: 'Импортирован, требует проверки'
@@ -1505,5 +1528,656 @@ function executeFullProductImport(articles, supplier) {
   } catch (error) {
     handleError(error, 'Полный импорт товаров');
     throw error;
+  }
+}
+
+// ========================================
+// УПРАВЛЕНИЕ СПРАВОЧНИКОМ ПАРАМЕТРОВ
+// ========================================
+
+/**
+ * МЕНЮ УПРАВЛЕНИЯ СПРАВОЧНИКОМ ПАРАМЕТРОВ
+ *
+ * Показывает диалог с опциями для работы со справочником
+ */
+function showSpecificationReferenceMenu() {
+  try {
+    const ui = SpreadsheetApp.getUi();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAMES.SPEC_REFERENCE);
+
+    let message = '📖 УПРАВЛЕНИЕ СПРАВОЧНИКОМ ПАРАМЕТРОВ\n\n';
+
+    if (sheet) {
+      const data = sheet.getDataRange().getValues();
+      const paramCount = data.length - 1; // Минус заголовок
+      message += `✅ Справочник существует\n`;
+      message += `   Параметров в справочнике: ${paramCount}\n\n`;
+      message += 'Выберите действие:\n\n';
+      message += '• [Да] - открыть лист справочника\n';
+      message += '• [Нет] - пересоздать заново из SPEC_MAPPING\n';
+      message += '• [Отмена] - загрузить данные из CSV файла';
+    } else {
+      message += '⚠️ Справочник не найден\n\n';
+      message += 'Справочник параметров необходим для корректной нормализации характеристик товаров.\n\n';
+      message += 'Выберите действие:\n\n';
+      message += '• [Да] - создать справочник из SPEC_MAPPING (10 параметров)\n';
+      message += '• [Нет] - импортировать из CSV файла (~50 параметров)\n';
+      message += '• [Отмена] - закрыть диалог';
+    }
+
+    const response = ui.alert(
+      'Справочник параметров',
+      message,
+      ui.ButtonSet.YES_NO_CANCEL
+    );
+
+    if (response === ui.Button.YES) {
+      if (sheet) {
+        // Открываем лист
+        ss.setActiveSheet(sheet);
+        ui.alert('✅ Лист справочника открыт', 'Теперь вы можете редактировать параметры, синонимы и функции нормализации.', ui.ButtonSet.OK);
+      } else {
+        // Создаем справочник из базовых данных
+        const createdSheet = initializeSpecificationReferenceSheet();
+        if (createdSheet) {
+          ss.setActiveSheet(createdSheet);
+          ui.alert(
+            '✅ Справочник создан',
+            `Создан лист "${SHEET_NAMES.SPEC_REFERENCE}" с ${createdSheet.getLastRow() - 1} параметрами.\n\n` +
+            'Вы можете:\n' +
+            '• Добавлять новые параметры\n' +
+            '• Редактировать синонимы для поставщиков\n' +
+            '• Включать/отключать параметры через чекбокс\n' +
+            '• Настраивать функции нормализации',
+            ui.ButtonSet.OK
+          );
+        }
+      }
+    } else if (response === ui.Button.NO) {
+      if (sheet) {
+        // Пересоздать справочник
+        const confirm = ui.alert(
+          '⚠️ Подтверждение',
+          'Это действие удалит текущий справочник и создаст новый из базовых данных SPEC_MAPPING.\n\n' +
+          'Все ваши изменения будут потеряны!\n\nПродолжить?',
+          ui.ButtonSet.YES_NO
+        );
+
+        if (confirm === ui.Button.YES) {
+          const createdSheet = initializeSpecificationReferenceSheet();
+          if (createdSheet) {
+            ss.setActiveSheet(createdSheet);
+            ui.alert('✅ Справочник пересоздан', 'Лист справочника обновлен с базовыми параметрами.', ui.ButtonSet.OK);
+          }
+        }
+      } else {
+        // Импорт из CSV
+        showCSVImportDialog();
+      }
+    } else if (response === ui.Button.CANCEL) {
+      // Третья кнопка
+      if (sheet) {
+        // Если справочник существует - импорт из CSV
+        showCSVImportDialog();
+      }
+      // Если справочника нет - просто закрываем
+    }
+
+  } catch (error) {
+    handleError(error, 'Меню справочника параметров');
+    SpreadsheetApp.getUi().alert(
+      'Ошибка',
+      'Не удалось открыть меню справочника: ' + error.message,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * ДИАЛОГ ИМПОРТА CSV
+ */
+function showCSVImportDialog() {
+  const ui = SpreadsheetApp.getUi();
+
+  const message = '📄 ИМПОРТ ИЗ CSV\n\n' +
+    'Для импорта параметров из CSV файла:\n\n' +
+    '1. Откройте CSV файл в текстовом редакторе\n' +
+    '2. Скопируйте всё содержимое (Ctrl+A, Ctrl+C)\n' +
+    '3. Нажмите ОК и вставьте в следующее окно\n\n' +
+    'Формат CSV:\n' +
+    '• Разделитель: запятая (,)\n' +
+    '• Кодировка: UTF-8\n' +
+    '• Первая строка: заголовки\n\n' +
+    'Готовы продолжить?';
+
+  const response = ui.alert('Импорт CSV', message, ui.ButtonSet.OK_CANCEL);
+
+  if (response === ui.Button.OK) {
+    // Показываем промпт для ввода CSV
+    const csvResponse = ui.prompt(
+      'Вставьте содержимое CSV',
+      'Вставьте сюда полное содержимое CSV файла (Ctrl+V):',
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (csvResponse.getSelectedButton() === ui.Button.OK) {
+      const csvText = csvResponse.getResponseText();
+
+      if (!csvText || csvText.trim().length < 10) {
+        ui.alert('Ошибка', 'CSV данные не были введены или слишком короткие', ui.ButtonSet.OK);
+        return;
+      }
+
+      try {
+        // Создаем справочник из CSV
+        const sheet = initializeSpecificationReferenceSheet(csvText);
+
+        if (sheet) {
+          SpreadsheetApp.getActiveSpreadsheet().setActiveSheet(sheet);
+          const paramCount = sheet.getLastRow() - 1;
+          ui.alert(
+            '✅ Импорт завершен',
+            `Справочник создан из CSV файла.\n\n` +
+            `Импортировано параметров: ${paramCount}\n\n` +
+            `Лист "${SHEET_NAMES.SPEC_REFERENCE}" активирован для редактирования.`,
+            ui.ButtonSet.OK
+          );
+        }
+      } catch (error) {
+        ui.alert(
+          '❌ Ошибка импорта',
+          `Не удалось импортировать CSV:\n\n${error.message}\n\n` +
+          'Проверьте формат файла и попробуйте снова.',
+          ui.ButtonSet.OK
+        );
+      }
+    }
+  }
+}
+
+
+// ========================================
+// СОЗДАНИЕ ТОВАРОВ В INSALES
+// ========================================
+
+/**
+ * Основное меню создания товаров в InSales
+ */
+function createProductsInInsalesMenu() {
+  try {
+    logInfo('📤 Запуск создания товаров в InSales');
+
+    const ui = SpreadsheetApp.getUi();
+
+    // Читаем выбранные товары
+    const selectedProducts = readSelectedProductsForImport();
+
+    if (selectedProducts.length === 0) {
+      ui.alert(
+        '⚠️ Нет выбранных товаров',
+        'Пожалуйста, отметьте чекбоксами товары, которые нужно создать в InSales.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+
+    // Сохраняем выбранные товары во временное свойство для использования после диалога
+    PropertiesService.getScriptProperties().setProperty(
+      'temp_selected_products',
+      JSON.stringify(selectedProducts.map(p => p.sku))  // Сохраняем только SKU
+    );
+
+    // Показываем диалог выбора категории
+    showCategoryPickerDialog(selectedProducts.length);
+
+  } catch (error) {
+    handleError(error, 'Меню создания товаров в InSales');
+    SpreadsheetApp.getUi().alert(
+      '❌ Ошибка',
+      `Произошла ошибка при создании товаров:\n\n${error.message}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+
+/**
+ * Создание товаров в InSales (основная логика)
+ *
+ * @param {Array} products - Массив товаров для создания
+ * @returns {Object} Результат импорта
+ */
+function createProductsInInsales(products) {
+  const result = {
+    total: products.length,
+    created: 0,
+    skipped: 0,
+    errors: 0,
+    details: []
+  };
+
+  try {
+    logInfo(`📦 Начинаем создание ${products.length} товаров в InSales`);
+
+    for (let i = 0; i < products.length; i++) {
+      const product = products[i];
+      const productNum = i + 1;
+
+      logInfo(`\n${'='.repeat(60)}`);
+      logInfo(`📦 Товар ${productNum}/${products.length}: "${product.title}" (${product.sku})`);
+      logInfo(`${'='.repeat(60)}`);
+
+      try {
+        // Обновляем статус на "Импорт..."
+        updateImportStatus(product.sku, STATUS_VALUES.IMPORT.IMPORTING);
+
+        // ПРОВЕРКА ДУБЛИКАТОВ УДАЛЕНА:
+        // Раньше здесь была проверка через checkProductExists(), которая делала сотни API запросов.
+        // Теперь полагаемся на InSales API - если товар с таким SKU существует,
+        // API вернёт ошибку (обычно 422 Unprocessable Entity), и мы обработаем её ниже.
+
+        // Создаем товар напрямую
+        logInfo('📦 Создаем товар в InSales');
+        const createdProduct = createInsalesProduct(product);
+
+        if (!createdProduct || !createdProduct.id) {
+          throw new Error('Не удалось создать товар - API не вернул ID');
+        }
+
+        logInfo(`✅ Товар создан с ID: ${createdProduct.id}`);
+
+        // Шаг 3: Добавляем изображения
+        if (product.imageUrls && product.imageUrls.length > 0) {
+          logInfo(`📸 Добавляем ${product.imageUrls.length} изображений`);
+          const imagesAdded = addProductImages(createdProduct.id, product.imageUrls);
+          logInfo(`✅ Добавлено ${imagesAdded} изображений`);
+        } else {
+          logWarning('⚠️ Нет изображений для добавления');
+        }
+
+        // Шаг 4: Обновляем статус
+        updateImportStatus(product.sku, STATUS_VALUES.IMPORT.IMPORTED, createdProduct.id);
+
+        result.created++;
+        result.details.push({
+          sku: product.sku,
+          title: product.title,
+          status: 'Создан ✅',
+          insalesId: createdProduct.id,
+          insalesUrl: `https://binokl.shop/admin/products/${createdProduct.id}`
+        });
+
+        logInfo(`✅ Товар "${product.title}" успешно импортирован (${productNum}/${products.length})`);
+
+      } catch (productError) {
+        handleError(productError, `Создание товара ${product.sku}`);
+
+        // Проверяем, не является ли ошибка дубликатом SKU
+        const errorMessage = productError.message || '';
+        const isDuplicate = errorMessage.includes('уже существует') ||
+                           errorMessage.includes('already exists') ||
+                           errorMessage.includes('duplicate') ||
+                           errorMessage.includes('SKU') ||
+                           errorMessage.includes('422');
+
+        if (isDuplicate) {
+          logWarning(`⚠️ Товар с артикулом "${product.sku}" уже существует в InSales`);
+          updateImportStatus(product.sku, STATUS_VALUES.IMPORT.EXISTS);
+
+          result.skipped++;
+          result.details.push({
+            sku: product.sku,
+            title: product.title,
+            status: 'Пропущен (уже существует)',
+            error: 'Товар с таким артикулом уже есть в InSales'
+          });
+        } else {
+          updateImportStatus(product.sku, STATUS_VALUES.IMPORT.ERROR);
+
+          result.errors++;
+          result.details.push({
+            sku: product.sku,
+            title: product.title,
+            status: 'Ошибка ❌',
+            error: productError.message
+          });
+        }
+      }
+
+      // Пауза между запросами
+      if (i < products.length - 1) {
+        Utilities.sleep(IMPORT_SETTINGS.API_DELAY_MS);
+      }
+    }
+
+    logInfo(`\n${'='.repeat(60)}`);
+    logInfo(`✅ ИМПОРТ ЗАВЕРШЕН`);
+    logInfo(`   Всего товаров: ${result.total}`);
+    logInfo(`   Создано: ${result.created}`);
+    logInfo(`   Пропущено: ${result.skipped}`);
+    logInfo(`   Ошибок: ${result.errors}`);
+    logInfo(`${'='.repeat(60)}\n`);
+
+    return result;
+
+  } catch (error) {
+    handleError(error, 'Создание товаров в InSales');
+    throw error;
+  }
+}
+
+
+/**
+ * Показ диалога с результатами импорта
+ *
+ * @param {Object} result - Результат импорта
+ */
+function showImportResultDialog(result) {
+  try {
+    const ui = SpreadsheetApp.getUi();
+
+    let message = `📊 РЕЗУЛЬТАТЫ ИМПОРТА\n\n`;
+    message += `Всего товаров: ${result.total}\n`;
+    message += `✅ Создано: ${result.created}\n`;
+    message += `⚠️ Пропущено (уже существуют): ${result.skipped}\n`;
+    message += `❌ Ошибок: ${result.errors}\n\n`;
+
+    if (result.details.length > 0) {
+      message += `ДЕТАЛИ:\n\n`;
+
+      // Показываем первые 10 товаров
+      const limit = Math.min(10, result.details.length);
+      for (let i = 0; i < limit; i++) {
+        const detail = result.details[i];
+        message += `${i + 1}. ${detail.sku} - ${detail.status}\n`;
+      }
+
+      if (result.details.length > 10) {
+        message += `\n... и еще ${result.details.length - 10} товаров\n`;
+      }
+    }
+
+    message += `\nПроверьте логи выполнения для подробностей.`;
+
+    const title = result.errors === 0 && result.created > 0
+      ? '✅ Импорт завершен успешно'
+      : result.errors > 0
+      ? '⚠️ Импорт завершен с ошибками'
+      : 'ℹ️ Импорт завершен';
+
+    ui.alert(title, message, ui.ButtonSet.OK);
+
+  } catch (error) {
+    handleError(error, 'Показ результатов импорта');
+  }
+}
+
+
+/**
+ * ДИАЛОГ ВЫБОРА КАТЕГОРИИ ДЛЯ ИМПОРТА
+ * ====================================
+ */
+
+/**
+ * Показывает диалог выбора категории перед импортом товаров
+ *
+ * @param {number} productCount - Количество товаров для импорта
+ */
+function showCategoryPickerDialog(productCount) {
+  try {
+    logInfo(`📂 Открытие диалога выбора категории для ${productCount} товаров`);
+
+    // Создаем HTML диалог из файла
+    const htmlTemplate = HtmlService.createTemplateFromFile('CategoryPickerDialog');
+
+    // Передаем параметры в HTML шаблон
+    htmlTemplate.productCount = productCount;
+
+    const htmlOutput = htmlTemplate.evaluate()
+      .setWidth(650)
+      .setHeight(700);
+
+    // Показываем модальный диалог
+    SpreadsheetApp.getUi().showModalDialog(htmlOutput, '📂 Выбор категории для импорта');
+
+    logInfo('✅ Диалог выбора категории открыт');
+
+  } catch (error) {
+    handleError(error, 'Открытие диалога выбора категории');
+    SpreadsheetApp.getUi().alert(
+      '❌ Ошибка',
+      `Не удалось открыть диалог: ${error.message}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+
+/**
+ * Возвращает список категорий из InSales для диалога выбора
+ *
+ * @returns {Array} Массив объектов категорий
+ */
+async function getCategoriesForImport() {
+  try {
+    logInfo('📋 Загрузка категорий из InSales для диалога');
+
+    // ОПТИМИЗАЦИЯ: Загружаем только категории БЕЗ подсчета товаров
+    // Подсчет товаров делает 1000+ запросов и занимает минуты
+    const categories = await makeInsalesRequest('GET', INSALES_ENDPOINTS.COLLECTIONS);
+
+    if (!categories || !Array.isArray(categories)) {
+      logWarning('⚠️ Не удалось загрузить категории');
+      return [];
+    }
+
+    logInfo(`📊 Загружено ${categories.length} категорий из InSales`);
+
+    // Строим иерархию без подсчета товаров
+    const categoryMap = {};
+    categories.forEach(cat => {
+      categoryMap[cat.id] = {
+        id: cat.id,
+        title: cat.title,
+        parent_id: cat.parent_id,
+        children: []
+      };
+    });
+
+    // Связываем родителей и детей
+    const rootCategories = [];
+    categories.forEach(cat => {
+      const category = categoryMap[cat.id];
+      if (cat.parent_id && categoryMap[cat.parent_id]) {
+        categoryMap[cat.parent_id].children.push(category);
+      } else {
+        rootCategories.push(category);
+      }
+    });
+
+    // Преобразуем в плоский список с путями
+    const flatCategories = [];
+
+    function processCategory(category, level = 0, parentPath = '') {
+      const path = parentPath ? `${parentPath} / ${category.title}` : category.title;
+
+      flatCategories.push({
+        id: category.id,
+        title: category.title,
+        path: path,
+        level: level,
+        parentId: category.parent_id
+      });
+
+      // Рекурсивно обрабатываем подкатегории
+      if (category.children && category.children.length > 0) {
+        category.children.forEach(child => {
+          processCategory(child, level + 1, path);
+        });
+      }
+    }
+
+    // Обрабатываем все корневые категории
+    rootCategories.forEach(rootCategory => {
+      processCategory(rootCategory, 0, '');
+    });
+
+    logInfo(`✅ Загружено ${flatCategories.length} категорий для диалога`);
+
+    return flatCategories;
+
+  } catch (error) {
+    handleError(error, 'Загрузка категорий для диалога');
+    throw new Error(`Не удалось загрузить категории: ${error.message}`);
+  }
+}
+
+
+/**
+ * Запускает импорт товаров с несколькими выбранными категориями
+ *
+ * @param {Array<number>} categoryIds - Массив ID выбранных категорий
+ * @returns {Object} Результат импорта
+ */
+function startProductImportWithCategories(categoryIds) {
+  try {
+    logInfo(`📦 Запуск импорта товаров в категории: ${categoryIds.join(', ')}`);
+
+    // Проверяем, что передан массив
+    if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
+      throw new Error('Не выбраны категории для импорта');
+    }
+
+    // Получаем сохраненные SKU товаров
+    const tempProductsSku = PropertiesService.getScriptProperties().getProperty('temp_selected_products');
+
+    if (!tempProductsSku) {
+      throw new Error('Не найдены данные о выбранных товарах. Попробуйте снова.');
+    }
+
+    const selectedSku = JSON.parse(tempProductsSku);
+
+    // Очищаем временное свойство
+    PropertiesService.getScriptProperties().deleteProperty('temp_selected_products');
+
+    // Первая категория будет основной (collection_id)
+    // Остальные добавим через collections_ids
+    const mainCategoryId = categoryIds[0];
+
+    // Читаем товары с основной категорией
+    const selectedProducts = readSelectedProductsForImport(mainCategoryId).filter(p =>
+      selectedSku.includes(p.sku)
+    );
+
+    if (selectedProducts.length === 0) {
+      throw new Error('Не удалось найти товары для импорта');
+    }
+
+    // Добавляем массив всех категорий к каждому товару
+    selectedProducts.forEach(product => {
+      product.collectionIds = categoryIds;  // Все категории для товара
+    });
+
+    logInfo(`✅ Подготовлено ${selectedProducts.length} товаров для импорта в ${categoryIds.length} категорий`);
+
+    // Запускаем процесс создания
+    const result = createProductsInInsales(selectedProducts);
+
+    // Показываем результат
+    showImportResultDialog(result);
+
+    return {
+      success: true,
+      categoryIds: categoryIds,
+      productsCount: selectedProducts.length
+    };
+
+  } catch (error) {
+    handleError(error, 'Запуск импорта с выбранными категориями');
+    throw error;
+  }
+}
+
+
+/**
+ * УСТАРЕВШАЯ: Запускает импорт товаров с одной категорией (для обратной совместимости)
+ *
+ * @deprecated Используйте startProductImportWithCategories() вместо этой функции
+ * @param {number} categoryId - ID выбранной категории
+ * @returns {Object} Результат импорта
+ */
+function startProductImportWithCategory(categoryId) {
+  // Переадресуем на новую функцию с массивом из одной категории
+  return startProductImportWithCategories([categoryId]);
+}
+
+// ========================================
+// ДИАЛОГ СОПОСТАВЛЕНИЯ ПАРАМЕТРОВ
+// ========================================
+
+/**
+ * Показывает диалог сопоставления параметров товара со справочником
+ *
+ * Позволяет пользователю:
+ * - Просмотреть сопоставленные и несопоставленные параметры
+ * - Вручную сопоставить параметры поставщика с параметрами справочника
+ * - Создать новые параметры в справочнике
+ * - Применить изменения локально (для одного товара) или глобально (для всех)
+ *
+ * @deprecated Используйте showUnifiedParameterDialog() вместо этой функции
+ */
+function showParameterMappingDialog() {
+  try {
+    logInfo('🔄 Открываем диалог сопоставления параметров');
+
+    // Получаем выделенные товары
+    const sheet = getImagesSheet();
+    const data = sheet.getDataRange().getValues();
+
+    // Ищем первый выделенный товар (с чекбоксом)
+    let selectedArticle = null;
+    for (let i = 1; i < data.length; i++) {
+      const isSelected = data[i][IMAGES_COLUMNS.CHECKBOX - 1];
+
+      if (isSelected === true) {
+        selectedArticle = String(data[i][IMAGES_COLUMNS.ARTICLE - 1]);
+        break;
+      }
+    }
+
+    if (!selectedArticle) {
+      const ui = SpreadsheetApp.getUi();
+      ui.alert(
+        'Товар не выбран',
+        'Пожалуйста, выберите товар с помощью чекбокса в первой колонке таблицы.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+
+    logInfo(`   Выбран товар: ${selectedArticle}`);
+
+    // Создаем HTML диалог
+    const htmlTemplate = HtmlService.createTemplateFromFile('ParameterMappingDialog');
+
+    // Передаем артикул через URL параметр
+    const htmlOutput = htmlTemplate.evaluate()
+      .setWidth(1200)
+      .setHeight(700)
+      .append(`<script>window.history.replaceState(null, '', '?article=${encodeURIComponent(selectedArticle)}');</script>`);
+
+    // Показываем модальный диалог
+    SpreadsheetApp.getUi().showModalDialog(htmlOutput, '🔄 Сопоставление параметров товара');
+
+    logInfo('✅ Диалог открыт');
+
+  } catch (error) {
+    handleError(error, 'Открытие диалога сопоставления параметров');
+    SpreadsheetApp.getUi().alert(
+      '❌ Ошибка',
+      `Не удалось открыть диалог: ${error.message}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
   }
 }

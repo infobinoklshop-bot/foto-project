@@ -15,17 +15,14 @@
 // КОНСТАНТЫ И НАСТРОЙКИ
 // ========================================
 
+// INSALES_ENDPOINTS теперь определен в 00_config.gs.js
 
-const INSALES_ENDPOINTS = {
+// Дополнительные эндпоинты, которых нет в основной конфигурации
+const LEGACY_ENDPOINTS = {
   ACCOUNT: '/admin/account.json',
   CATEGORIES: '/admin/categories.json',  // КАТАЛОГ - основная структура
-  COLLECTIONS: '/admin/collections.json', // КОЛЛЕКЦИИ - тематические подборки
   CATEGORY_BY_ID: '/admin/categories/{id}.json',
-  COLLECTION_BY_ID: '/admin/collections/{id}.json',
-  PRODUCTS: '/admin/products.json',
-  PRODUCT_BY_ID: '/admin/products/{id}.json',
-  PRODUCT_VARIANTS: '/admin/products/{product_id}/variants.json', // ВАРИАНТЫ с артикулами
-  PRODUCT_IMAGES: '/admin/products/{product_id}/images.json'
+  PRODUCT_VARIANTS: '/admin/products/{product_id}/variants.json' // ВАРИАНТЫ с артикулами
 };
 
 
@@ -58,7 +55,7 @@ async function testInsalesConnection() {
       return false;
     }
     
-    const response = await makeInsalesRequest('GET', INSALES_ENDPOINTS.ACCOUNT);
+    const response = await makeInsalesRequest('GET', LEGACY_ENDPOINTS.ACCOUNT);
     
     if (response && response.id) {
       logInfo('✅ Подключение к InSales успешно установлено', {
@@ -84,33 +81,33 @@ async function testInsalesConnection() {
 /**
  * Получение учетных данных InSales
  */
-async function getInsalesCredentials() {
+function getInsalesCredentials() {
   try {
     const apiKey = getSetting('insalesApiKey') || getSetting('InSales_API_Key');
     const password = getSetting('insalesPassword') || getSetting('InSales_Password');
     const shop = getSetting('insalesShop') || getSetting('InSales_Shop');
-    
+
     if (!apiKey || !password || !shop) {
       logError('❌ Отсутствуют обязательные настройки InSales');
       return null;
     }
-    
+
     const baseUrl = `https://${shop}`;
-    
+
     logInfo('✅ Учетные данные InSales получены', {
       shop: shop,
       baseUrl: baseUrl,
       hasApiKey: !!apiKey,
       hasPassword: !!password
     });
-    
+
     return {
       apiKey: apiKey,
       password: password,
       shop: shop,
       baseUrl: baseUrl
     };
-    
+
   } catch (error) {
     handleError(error, 'Получение учетных данных InSales');
     return null;
@@ -121,12 +118,12 @@ async function getInsalesCredentials() {
 /**
  * Универсальная функция для выполнения запросов к InSales API
  */
-async function makeInsalesRequest(method, endpoint, payload = null, params = null) {
+function makeInsalesRequest(method, endpoint, payload = null, params = null) {
   const context = `InSales API ${method} ${endpoint}`;
-  const maxRetries = 3;
-  
+  const maxRetries = 5; // Увеличено с 3 до 5 для лучшей обработки Rate Limit
+
   try {
-    const credentials = await getInsalesCredentials();
+    const credentials = getInsalesCredentials();
     
     if (!credentials) {
       throw new Error('Не удалось получить учетные данные');
@@ -175,7 +172,7 @@ async function makeInsalesRequest(method, endpoint, payload = null, params = nul
         const response = UrlFetchApp.fetch(url, options);
         const responseCode = response.getResponseCode();
         const responseText = response.getContentText();
-        
+
         if (responseCode === 200 || responseCode === 201) {
           if (responseText && responseText.trim()) {
             try {
@@ -190,24 +187,39 @@ async function makeInsalesRequest(method, endpoint, payload = null, params = nul
           }
         } else if (responseCode === 429) {
           const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
-          logWarning(`⏳ Rate limit (429), ждем ${delay}мс перед повтором`);
+          logWarning(`⏳ Rate limit (429), ждем ${delay}мс перед повтором (попытка ${attempt}/${maxRetries})`);
+
+          if (attempt === maxRetries) {
+            logError(`❌ Все ${maxRetries} попытки исчерпаны из-за Rate Limit 429`);
+            throw new Error(`Rate limit исчерпан после ${maxRetries} попыток`);
+          }
+
           Utilities.sleep(delay);
           continue;
         } else if (responseCode === 404) {
           logWarning(`❌ Ресурс не найден (404): ${endpoint}`);
           return null;
+        } else if (responseCode === 422) {
+          // 422 Unprocessable Entity - обычно означает проблему валидации (дубликат SKU и т.д.)
+          logWarning(`⚠️ Ошибка валидации (422): ${responseText}`);
+          throw new Error(`Ошибка валидации: ${responseText}`);
         } else {
           throw new Error(`HTTP ${responseCode}: ${responseText}`);
         }
-        
+
       } catch (fetchError) {
         if (attempt === maxRetries) {
           throw fetchError;
         }
+        logWarning(`⚠️ Ошибка запроса (попытка ${attempt}/${maxRetries}): ${fetchError.message}`);
         Utilities.sleep(1000 * attempt);
       }
     }
-    
+
+    // Если мы дошли сюда - все попытки провалились
+    logError(`❌ Все ${maxRetries} попытки запроса провалились`);
+    throw new Error(`Не удалось выполнить запрос после ${maxRetries} попыток`);
+
   } catch (error) {
     logError('❌ Ошибка в makeInsalesRequest:', error, context);
     throw error;
@@ -695,16 +707,16 @@ async function loadProductsFromCategory(categoryId) {
 /**
  * ИСПРАВЛЕНО: Загружает варианты товара для получения правильных артикулов
  */
-async function loadProductVariants(productId) {
+function loadProductVariants(productId) {
   try {
-    const variantsEndpoint = INSALES_ENDPOINTS.PRODUCT_VARIANTS.replace('{product_id}', productId);
-    const variants = await makeInsalesRequest('GET', variantsEndpoint);
-    
+    const variantsEndpoint = LEGACY_ENDPOINTS.PRODUCT_VARIANTS.replace('{product_id}', productId);
+    const variants = makeInsalesRequest('GET', variantsEndpoint);
+
     if (variants && Array.isArray(variants)) {
       logDebug(`📦 Загружено ${variants.length} вариантов для товара ${productId}`);
       return variants;
     }
-    
+
     logDebug(`⚠️ Варианты не найдены для товара ${productId}`);
     return [];
   } catch (error) {
@@ -1310,7 +1322,7 @@ async function findOrCreateCategories(categoriesString) {
 
         const newCategory = await makeInsalesRequest(
           'POST',
-          INSALES_ENDPOINTS.CATEGORIES,
+          LEGACY_ENDPOINTS.CATEGORIES,
           {
             category: {
               title: categoryName,
@@ -4742,4 +4754,388 @@ function createImprovedAltTagHelperHTML(products) {
 </html>`;
 
   return htmlContent;
+}
+
+
+// ========================================
+// ФУНКЦИИ СОЗДАНИЯ ТОВАРОВ В INSALES
+// ========================================
+
+/**
+ * Проверка существования товара по артикулу (SKU)
+ *
+ * @param {string} sku - Артикул товара
+ * @returns {Object|null} Товар, если найден, иначе null
+ */
+function checkProductExists(sku) {
+  try {
+    logInfo(`🔍 Проверяем существование товара с артикулом: ${sku}`);
+
+    // ОПТИМИЗИРОВАННАЯ ВЕРСИЯ (исправлена бесконечная загрузка):
+    // ❌ СТАРАЯ ПРОБЛЕМА: загружала ВСЕ товары постранично + вызывала loadProductVariants для каждого
+    // ✅ НОВОЕ РЕШЕНИЕ: проверяем только первые 50 товаров, используя variants из основного ответа API
+    //
+    // InSales API включает variants в ответ /admin/products.json, поэтому
+    // нам НЕ нужны дополнительные запросы к /admin/products/{id}/variants.json
+
+    const products = makeInsalesRequest(
+      'GET',
+      INSALES_ENDPOINTS.PRODUCTS,
+      null,
+      { per_page: 50, page: 1 }
+    );
+
+    if (products && Array.isArray(products)) {
+      // Проверяем каждый товар и его варианты (variants уже в ответе API)
+      for (const product of products) {
+        if (product.variants && Array.isArray(product.variants)) {
+          for (const variant of product.variants) {
+            if (variant.sku && variant.sku.toString().trim() === sku.toString().trim()) {
+              logInfo(`✅ Товар найден: "${product.title}" (ID: ${product.id})`);
+              return {
+                ...product,
+                matchedVariant: variant
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // Если не нашли в первых 50 товарах, считаем что товара нет
+    // Это защитит от длительного поиска по всей базе (может быть 1000+ товаров)
+    logInfo(`ℹ️ Товар с артикулом "${sku}" не найден в InSales`);
+    return null;
+
+  } catch (error) {
+    handleError(error, `Проверка существования товара ${sku}`);
+    return null;
+  }
+}
+
+
+/**
+ * Создание товара в InSales
+ *
+ * @param {Object} productData - Данные товара для создания
+ * @returns {Object|null} Созданный товар или null при ошибке
+ */
+function createInsalesProduct(productData) {
+  try {
+    const {
+      categoryId = DEFAULT_CATEGORY_ID,
+      collectionIds,  // Массив ID категорий для множественного выбора
+      title,
+      description,
+      shortDescription,
+      sku,
+      price,
+      quantity,
+      properties,
+      isHidden = IMPORT_SETTINGS.CREATE_HIDDEN
+    } = productData;
+
+    // Валидация обязательных полей
+    if (!title) {
+      throw new Error('Отсутствует название товара');
+    }
+
+    if (!sku) {
+      throw new Error('Отсутствует артикул товара');
+    }
+
+    if (!price || price <= 0) {
+      throw new Error('Отсутствует или некорректная цена товара');
+    }
+
+    logInfo(`📦 Создаем товар в InSales: "${title}" (${sku})`);
+
+    // Формируем payload для API
+    // ВАЖНО: поля collection_id и collections_ids НЕ РАБОТАЮТ при создании товара!
+    // Категории добавляются ПОСЛЕ создания через API collects
+    const payload = {
+      product: {
+        'title': title,
+        'is-hidden': isHidden,
+        'available': true
+      }
+    };
+
+    // Добавляем описания
+    if (description) {
+      payload.product.description = description;
+    }
+
+    if (shortDescription) {
+      payload.product['short-description'] = shortDescription;
+    }
+
+    // Создаем вариант товара с SKU и ценой
+    // ВАЖНО: InSales API использует подчёркивания, а не дефисы!
+    payload.product['variants_attributes'] = [{
+      'sku': sku,
+      'price': parseFloat(price),
+      'quantity': quantity !== null && quantity !== undefined ? parseInt(quantity) : null
+    }];
+
+    // Добавляем характеристики (properties)
+    if (properties && Array.isArray(properties) && properties.length > 0) {
+      payload.product['properties_attributes'] = properties.map(prop => ({
+        'title': prop.title || prop.name,
+        'value': prop.value
+      }));
+    }
+
+    logInfo('🌐 Отправляем запрос на создание товара', {
+      categoryId,
+      title,
+      sku,
+      price,
+      quantity,
+      propertiesCount: properties ? properties.length : 0,
+      payloadKeys: Object.keys(payload.product).join(', ')
+    });
+
+    // Выполняем запрос к API
+    const response = makeInsalesRequest(
+      'POST',
+      INSALES_ENDPOINTS.PRODUCTS,
+      payload
+    );
+
+    // Логируем полный ответ для отладки
+    logInfo('📥 Ответ API при создании товара', {
+      hasResponse: !!response,
+      responseType: typeof response,
+      hasId: response ? !!response.id : false,
+      responseKeys: response ? Object.keys(response).join(', ') : 'null'
+    });
+
+    if (!response || !response.id) {
+      logError('❌ API вернул некорректный ответ', {
+        response: JSON.stringify(response)
+      });
+      throw new Error('API не вернул ID созданного товара');
+    }
+
+    logInfo(`✅ Товар успешно создан в InSales`, {
+      productId: response.id,
+      title: response.title,
+      permalink: response.permalink,
+      categoryId: response.category_id,
+      isHidden: response.is_hidden
+    });
+
+    // Добавляем товар в выбранные категории (если указаны)
+    if (collectionIds && Array.isArray(collectionIds) && collectionIds.length > 0) {
+      logInfo(`📂 Добавляем товар в ${collectionIds.length} категорий: ${collectionIds.join(', ')}`);
+      const addedCount = addProductToCollections(response.id, collectionIds);
+
+      if (addedCount > 0) {
+        logInfo(`✅ Товар добавлен в ${addedCount} категорий`);
+      } else {
+        logWarning(`⚠️ Не удалось добавить товар в категории`);
+      }
+    } else if (categoryId) {
+      // Если передана одна категория через categoryId (старая логика)
+      logInfo(`📂 Добавляем товар в категорию ${categoryId}`);
+      addProductToCollection(response.id, categoryId);
+    }
+
+    return response;
+
+  } catch (error) {
+    handleError(error, 'Создание товара в InSales', {
+      title: productData.title,
+      sku: productData.sku
+    });
+    return null;
+  }
+}
+
+
+/**
+ * Добавляет товар в категорию через API collects
+ *
+ * @param {number} productId - ID товара в InSales
+ * @param {number} collectionId - ID категории (collection)
+ * @returns {Object|null} Созданная связь или null при ошибке
+ */
+function addProductToCollection(productId, collectionId) {
+  const context = 'addProductToCollection';
+
+  try {
+    logInfo(`📂 Добавляем товар ${productId} в категорию ${collectionId}`, null, context);
+
+    const payload = {
+      collect: {
+        'product_id': productId,
+        'collection_id': collectionId
+      }
+    };
+
+    const response = makeInsalesRequest(
+      'POST',
+      INSALES_ENDPOINTS.COLLECTS,
+      payload
+    );
+
+    if (response && response.id) {
+      logInfo(`✅ Товар успешно добавлен в категорию (collect ID: ${response.id})`, null, context);
+      return response;
+    } else {
+      logWarning(`⚠️ Не удалось добавить товар в категорию ${collectionId}`, null, context);
+      return null;
+    }
+
+  } catch (error) {
+    handleError(error, `Добавление товара ${productId} в категорию ${collectionId}`, {
+      productId,
+      collectionId
+    });
+    return null;
+  }
+}
+
+
+/**
+ * Добавляет товар в несколько категорий
+ *
+ * @param {number} productId - ID товара в InSales
+ * @param {Array<number>} collectionIds - Массив ID категорий
+ * @returns {number} Количество успешно добавленных связей
+ */
+function addProductToCollections(productId, collectionIds) {
+  const context = 'addProductToCollections';
+
+  try {
+    if (!collectionIds || !Array.isArray(collectionIds) || collectionIds.length === 0) {
+      logWarning('⚠️ Не указаны категории для добавления товара', null, context);
+      return 0;
+    }
+
+    logInfo(`📂 Добавляем товар ${productId} в ${collectionIds.length} категорий: ${collectionIds.join(', ')}`, null, context);
+
+    let successCount = 0;
+
+    for (let i = 0; i < collectionIds.length; i++) {
+      const collectionId = collectionIds[i];
+
+      // Добавляем товар в категорию
+      const collect = addProductToCollection(productId, collectionId);
+
+      if (collect) {
+        successCount++;
+      }
+
+      // Пауза между запросами для избежания rate limit
+      if (i < collectionIds.length - 1) {
+        Utilities.sleep(500); // 0.5 секунды между запросами
+      }
+    }
+
+    logInfo(`✅ Товар добавлен в ${successCount} из ${collectionIds.length} категорий`, null, context);
+
+    return successCount;
+
+  } catch (error) {
+    handleError(error, 'Добавление товара в несколько категорий', {
+      productId,
+      collectionIds
+    });
+    return 0;
+  }
+}
+
+
+/**
+ * Добавление изображения к товару
+ *
+ * @param {number} productId - ID товара в InSales
+ * @param {string} imageUrl - URL изображения
+ * @param {number} position - Позиция изображения (1 = главное фото)
+ * @returns {Object|null} Добавленное изображение или null при ошибке
+ */
+function addProductImage(productId, imageUrl, position = 1) {
+  try {
+    if (!imageUrl || !imageUrl.startsWith('http')) {
+      logWarning(`⚠️ Некорректный URL изображения: ${imageUrl}`);
+      return null;
+    }
+
+    logInfo(`🖼️ Добавляем изображение к товару ${productId} (позиция ${position})`);
+
+    const endpoint = INSALES_ENDPOINTS.PRODUCT_IMAGES.replace('{product_id}', productId);
+
+    const payload = {
+      image: {
+        src: imageUrl,
+        position: position
+      }
+    };
+
+    const response = makeInsalesRequest('POST', endpoint, payload);
+
+    if (response && response.id) {
+      logInfo(`✅ Изображение успешно добавлено (ID: ${response.id})`);
+      return response;
+    } else {
+      logWarning(`⚠️ Не удалось добавить изображение к товару ${productId}`);
+      return null;
+    }
+
+  } catch (error) {
+    handleError(error, `Добавление изображения к товару ${productId}`, {
+      imageUrl,
+      position
+    });
+    return null;
+  }
+}
+
+
+/**
+ * Добавление нескольких изображений к товару
+ *
+ * @param {number} productId - ID товара в InSales
+ * @param {Array<string>} imageUrls - Массив URL изображений
+ * @returns {number} Количество успешно добавленных изображений
+ */
+function addProductImages(productId, imageUrls) {
+  try {
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      logWarning('⚠️ Массив изображений пуст');
+      return 0;
+    }
+
+    // Ограничиваем количество изображений
+    const limitedUrls = imageUrls.slice(0, IMPORT_SETTINGS.MAX_IMAGES_PER_PRODUCT);
+
+    logInfo(`📸 Добавляем ${limitedUrls.length} изображений к товару ${productId}`);
+
+    let successCount = 0;
+
+    for (let i = 0; i < limitedUrls.length; i++) {
+      const imageUrl = limitedUrls[i];
+      const position = i + 1;
+
+      const result = addProductImage(productId, imageUrl, position);
+
+      if (result) {
+        successCount++;
+      }
+
+      // Пауза между запросами для избежания rate limit
+      if (i < limitedUrls.length - 1) {
+        Utilities.sleep(IMPORT_SETTINGS.API_DELAY_MS);
+      }
+    }
+
+    logInfo(`✅ Добавлено ${successCount} из ${limitedUrls.length} изображений`);
+    return successCount;
+
+  } catch (error) {
+    handleError(error, `Добавление изображений к товару ${productId}`);
+    return 0;
+  }
 }

@@ -900,8 +900,20 @@ function extractVeberDescription(html) {
 function extractVeberSpecifications(html) {
   const specs = {};
 
-  // Парсим таблицу характеристик
-  const tableMatch = html.match(/<table[^>]*class="[^"]*charact[^"]*"[^>]*>(.*?)<\/table>/is);
+  // Парсим таблицу характеристик из вкладки v-specifications
+  // Сначала пробуем найти таблицу внутри div с id="v-specifications"
+  let tableMatch = html.match(/<div[^>]*id="v-specifications"[^>]*>.*?<table[^>]*>(.*?)<\/table>/is);
+
+  // Если не нашли, пробуем просто найти таблицу с классом charact (старый формат)
+  if (!tableMatch) {
+    tableMatch = html.match(/<table[^>]*class="[^"]*charact[^"]*"[^>]*>(.*?)<\/table>/is);
+  }
+
+  // Если не нашли, ищем любую таблицу внутри tab-pane
+  if (!tableMatch) {
+    tableMatch = html.match(/<div[^>]*class="[^"]*tab-pane[^"]*"[^>]*>.*?<table[^>]*>(.*?)<\/table>/is);
+  }
+
   if (tableMatch) {
     const rows = tableMatch[1].matchAll(/<tr[^>]*>.*?<td[^>]*>(.*?)<\/td>.*?<td[^>]*>(.*?)<\/td>.*?<\/tr>/gis);
     for (const row of rows) {
@@ -915,14 +927,60 @@ function extractVeberSpecifications(html) {
 }
 
 function extractVeberPrice(html) {
-  const priceMatch = html.match(/data-price="(\d+)"/i) ||
-                     html.match(/<span[^>]*class="[^"]*price[^"]*"[^>]*>(\d+)/i);
-  return priceMatch ? priceMatch[1] : '';
+  // ✅ ИСПРАВЛЕНИЕ: Избегаем ложного срабатывания на priceRange в Schema.org
+  // Сначала вырезаем Schema.org JSON-LD блок, чтобы он не мешал
+
+  let cleanHtml = html;
+
+  // Удаляем Schema.org script блоки
+  cleanHtml = cleanHtml.replace(/<script[^>]*type="application\/ld\+json"[^>]*>.*?<\/script>/gis, '');
+
+  // 1. Ищем первое число перед "руб" (это актуальная цена с учётом скидки)
+  const priceWithSpaces = cleanHtml.match(/(\d+(?:\s+\d+)*)\s*руб/i);
+  if (priceWithSpaces) {
+    const price = priceWithSpaces[1].replace(/\s+/g, '');
+    // Защита от priceRange: если цена > 100000, скорее всего это не цена товара
+    if (parseInt(price) < 100000) {
+      return price;
+    }
+  }
+
+  // 2. Fallback: data-price атрибут
+  const dataPrice = html.match(/data-price="(\d+)"/i);
+  if (dataPrice) return dataPrice[1];
+
+  // 3. Fallback: meta itemprop (может быть старая цена)
+  const metaPrice = html.match(/<meta[^>]*itemprop="price"[^>]*content="(\d+)"/i);
+  if (metaPrice) return metaPrice[1];
+
+  // 4. Fallback: class="price"
+  const classPrice = html.match(/<span[^>]*class="[^"]*price[^"]*"[^>]*>(\d+)/i);
+  if (classPrice) return classPrice[1];
+
+  return '';
 }
 
 function extractVeberStock(html) {
-  if (html.match(/в наличии/i) || html.match(/in stock/i)) return 'В наличии';
-  if (html.match(/под заказ/i)) return 'Под заказ';
+  // ✅ ИСПРАВЛЕНИЕ: Определяем наличие по кнопкам действий
+  // Если есть кнопка "Купить" → товар в наличии → 5 шт
+  // Если есть "Сообщить о поступлении" → товара нет → 0 шт
+
+  // 1. Проверяем наличие кнопки "Купить" (товар в наличии)
+  if (html.match(/купить|добавить в корзину|buy now/i)) {
+    return 'В наличии';
+  }
+
+  // 2. Проверяем "Сообщить о поступлении" (товара нет)
+  if (html.match(/сообщить о поступлении|notify.*available/i)) {
+    return 'Нет в наличии';
+  }
+
+  // 3. Проверяем "под заказ"
+  if (html.match(/под заказ/i)) {
+    return 'Под заказ';
+  }
+
+  // 4. По умолчанию
   return 'Уточняйте';
 }
 
@@ -949,7 +1007,8 @@ function parseSturmanFullProduct(articleOrUrl) {
         headers: { 'User-Agent': 'Mozilla/5.0' }
       }).getContentText();
 
-      const linkMatch = searchHtml.match(/href="(\/opt\/product\/[^"]+)"/i);
+      // ИСПРАВЛЕНО: Ищем как /opt/product/, так и /product/ (обычный сайт)
+      const linkMatch = searchHtml.match(/href="(\/(?:opt\/)?product\/[^"]+)"/i);
       if (!linkMatch) {
         logWarning(`⚠️ Товар ${articleOrUrl} не найден на Sturman`);
         return null;
@@ -1020,7 +1079,7 @@ function extractSturmanDescription(html) {
 function extractSturmanSpecifications(html) {
   const specs = {};
 
-  // Webasyst структура характеристик
+  // МЕТОД 1: Webasyst структура характеристик (оптовый сайт /opt/)
   const featuresMatch = html.match(/<div[^>]*class="[^"]*wa-product-features[^"]*"[^>]*>(.*?)<\/div>/is);
   if (featuresMatch) {
     const items = featuresMatch[1].matchAll(/<div[^>]*class="feature[^"]*"[^>]*>.*?<span[^>]*class="name"[^>]*>(.*?)<\/span>.*?<span[^>]*class="value"[^>]*>(.*?)<\/span>/gis);
@@ -1031,12 +1090,29 @@ function extractSturmanSpecifications(html) {
     }
   }
 
+  // МЕТОД 2: Обычный сайт (структура p-f)
+  // ИСПРАВЛЕНО: Используем правильный класс p-f вместо p-features-i
+  if (Object.keys(specs).length === 0) {
+    const rows = html.matchAll(/<div[^>]*class="p-f"[^>]*>\s*<span[^>]*class="p-f-name"[^>]*>(.*?)<\/span>\s*<span[^>]*class="p-f-value"[^>]*>(.*?)<\/span>/gis);
+
+    for (const row of rows) {
+      const key = cleanHtml(row[1]).trim();
+      const value = cleanHtml(row[2]).trim();
+
+      if (key && value && key.length > 2 && value.length > 0) {
+        specs[key] = value;
+      }
+    }
+  }
+
   return JSON.stringify(specs);
 }
 
 function extractSturmanPrice(html) {
-  const match = html.match(/<span[^>]*itemprop="price"[^>]*content="(\d+)"/i) ||
-                html.match(/<span[^>]*class="[^"]*price[^"]*"[^>]*>(\d+)/i);
+  // ИСПРАВЛЕНО: Ищем <meta itemprop="price"> вместо <span>
+  const match = html.match(/<meta[^>]*itemprop="price"[^>]*content="(\d+)"/i) ||
+                html.match(/<span[^>]*itemprop="price"[^>]*content="(\d+)"/i) ||
+                html.match(/<(?:span|div)[^>]*class="[^"]*price[^"]*"[^>]*>(\d+)/i);
   return match ? match[1] : '';
 }
 

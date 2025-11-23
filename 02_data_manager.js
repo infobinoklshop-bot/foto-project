@@ -240,16 +240,34 @@ function setupColumnWidths(sheet) {
     
     // Определяем ширину для каждой колонки (в пикселях)
     const columnWidths = {
-      [IMAGES_COLUMNS.CHECKBOX]: 80,           // A - Чекбокс
-      [IMAGES_COLUMNS.ARTICLE]: 120,           // B - Артикул
-      [IMAGES_COLUMNS.INSALES_ID]: 100,        // C - ID InSales
-      [IMAGES_COLUMNS.PRODUCT_NAME]: 200,      // D - Название товара
-      [IMAGES_COLUMNS.ORIGINAL_IMAGES]: 150,   // E - Исходные изображения
-      [IMAGES_COLUMNS.PROCESSED_IMAGES]: 150,  // F - Обработанные изображения
-      [IMAGES_COLUMNS.ALT_TAGS]: 180,          // G - Alt-теги
-      [IMAGES_COLUMNS.SEO_FILENAMES]: 180,     // H - SEO имена файлов
-      [IMAGES_COLUMNS.PROCESSING_STATUS]: 130, // I - Статус обработки
-      [IMAGES_COLUMNS.INSALES_STATUS]: 130     // J - Статус InSales
+      [IMAGES_COLUMNS.CHECKBOX]: 80,                      // A - Чекбокс
+      [IMAGES_COLUMNS.ARTICLE]: 120,                      // B - Артикул
+      [IMAGES_COLUMNS.INSALES_ID]: 100,                   // C - ID InSales
+      [IMAGES_COLUMNS.PRODUCT_NAME]: 200,                 // D - Название товара
+      [IMAGES_COLUMNS.ORIGINAL_IMAGES]: 150,              // E - Исходные изображения
+      [IMAGES_COLUMNS.SUPPLIER_IMAGES]: 150,              // F - Парсинг Поставщика
+      [IMAGES_COLUMNS.ADDITIONAL_IMAGES]: 150,            // G - Дополнительные фото
+      [IMAGES_COLUMNS.PROCESSED_IMAGES]: 150,             // H - Обработанные изображения
+      [IMAGES_COLUMNS.ALT_TAGS]: 180,                     // I - Alt-теги
+      [IMAGES_COLUMNS.SEO_FILENAMES]: 180,                // J - SEO имена файлов
+      [IMAGES_COLUMNS.PROCESSING_STATUS]: 130,            // K - Статус обработки
+      [IMAGES_COLUMNS.INSALES_STATUS]: 130,               // L - Статус InSales
+      [IMAGES_COLUMNS.DESCRIPTION]: 250,                  // M - Описание поставщика
+      [IMAGES_COLUMNS.DESCRIPTION_REWRITTEN]: 250,        // N - Описание (рерайт AI)
+      [IMAGES_COLUMNS.SHORT_DESCRIPTION]: 200,            // O - Краткое описание
+      [IMAGES_COLUMNS.SPECIFICATIONS_RAW]: 200,           // P - Характеристики (сырые)
+      [IMAGES_COLUMNS.SPECIFICATIONS_NORMALIZED]: 200,    // Q - Характеристики (норм.)
+      [IMAGES_COLUMNS.PRICE]: 100,                        // R - Цена
+      [IMAGES_COLUMNS.STOCK]: 80,                         // S - Остаток
+      [IMAGES_COLUMNS.CATEGORIES]: 180,                   // T - Категории
+      [IMAGES_COLUMNS.BRAND]: 120,                        // U - Бренд
+      [IMAGES_COLUMNS.SERIES]: 120,                       // V - Серия
+      [IMAGES_COLUMNS.WEIGHT]: 80,                        // W - Вес, г
+      [IMAGES_COLUMNS.DIMENSIONS]: 120,                   // X - Габариты
+      [IMAGES_COLUMNS.PACKAGE_CONTENTS]: 180,             // Y - Комплектация
+      [IMAGES_COLUMNS.MATCH_STATUS]: 150,                 // Z - Статус сопоставления
+      [IMAGES_COLUMNS.MATCH_CONFIDENCE]: 100,             // AA - Совпадение, %
+      [IMAGES_COLUMNS.IMPORT_STATUS]: 150                 // AB - Статус импорта
     };
     
     // Применяем ширину для каждой колонки
@@ -1419,7 +1437,7 @@ function writeFullProductData(productData) {
     // Подготовка значений для всех колонок
     const rowData = new Array(Object.keys(IMAGES_COLUMNS).length).fill('');
 
-    rowData[IMAGES_COLUMNS.CHECKBOX - 1] = false;
+    rowData[IMAGES_COLUMNS.CHECKBOX - 1] = true;  // ✅ При импорте автоматически отмечаем товар
     rowData[IMAGES_COLUMNS.ARTICLE - 1] = productData.article || '';
     rowData[IMAGES_COLUMNS.INSALES_ID - 1] = productData.insalesId || '';
     rowData[IMAGES_COLUMNS.PRODUCT_NAME - 1] = productData.productName || '';
@@ -1452,6 +1470,14 @@ function writeFullProductData(productData) {
 
     // Записываем строку
     sheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+
+    // ✅ Устанавливаем data validation для чекбокса (иначе будет показывать TRUE/FALSE)
+    const checkboxCell = sheet.getRange(targetRow, IMAGES_COLUMNS.CHECKBOX);
+    const checkboxRule = SpreadsheetApp.newDataValidation()
+      .requireCheckbox()
+      .setAllowInvalid(false)
+      .build();
+    checkboxCell.setDataValidation(checkboxRule);
 
     logInfo(`✅ Товар ${productData.article} записан в строку ${targetRow}`);
     return true;
@@ -1494,6 +1520,358 @@ function updateProductField(article, fieldName, value) {
 
   } catch (error) {
     handleError(error, 'Обновление поля товара');
+    return false;
+  }
+}
+
+// =============================================================================
+// 🔄 ОБНОВЛЕНИЕ СТРУКТУРЫ ТАБЛИЦЫ
+// =============================================================================
+
+/**
+ * ОБНОВЛЕНИЕ СТРУКТУРЫ СУЩЕСТВУЮЩЕЙ ТАБЛИЦЫ
+ *
+ * Добавляет недостающие колонки M-AB к существующей таблице
+ * Эта функция безопасна - она только добавляет новые колонки, не удаляя данные
+ *
+ * @returns {Object} Результат обновления
+ */
+function updateSheetStructure() {
+  try {
+    logInfo('🔄 Начинаем обновление структуры таблицы...');
+
+    const ui = SpreadsheetApp.getUi();
+    const sheet = getImagesSheet();
+
+    // Получаем текущее количество колонок
+    const currentColumns = sheet.getLastColumn();
+    const requiredColumns = Object.keys(IMAGES_COLUMNS).length; // 28 колонок (A-AB)
+
+    logInfo(`📊 Текущих колонок: ${currentColumns}, требуется: ${requiredColumns}`);
+
+    if (currentColumns >= requiredColumns) {
+      ui.alert(
+        '✅ Структура актуальна',
+        `Таблица уже содержит все необходимые колонки (${currentColumns}).\n\nОбновление не требуется.`,
+        ui.ButtonSet.OK
+      );
+      return { success: true, added: 0, message: 'Обновление не требуется' };
+    }
+
+    // Подтверждение обновления
+    const response = ui.alert(
+      '🔄 Обновление структуры',
+      `Будет добавлено ${requiredColumns - currentColumns} новых колонок (M-AB):\n\n` +
+      '• Описание поставщика\n' +
+      '• Описание (рерайт AI)\n' +
+      '• Краткое описание\n' +
+      '• Характеристики (сырые)\n' +
+      '• Характеристики (норм.)\n' +
+      '• Цена, Остаток, Категории\n' +
+      '• Бренд, Серия, Вес, Габариты\n' +
+      '• Комплектация\n' +
+      '• Статус сопоставления\n' +
+      '• Совпадение, %\n' +
+      '• Статус импорта\n\n' +
+      'Продолжить?',
+      ui.ButtonSet.YES_NO
+    );
+
+    if (response !== ui.Button.YES) {
+      logInfo('❌ Обновление отменено пользователем');
+      return { success: false, added: 0, message: 'Отменено пользователем' };
+    }
+
+    // Добавляем недостающие колонки
+    const columnsToAdd = requiredColumns - currentColumns;
+
+    // Обновляем заголовки (вызовем setupHeaders, который перезапишет все заголовки)
+    setupHeaders(sheet);
+
+    // Обновляем ширину всех колонок
+    setupColumnWidths(sheet);
+
+    // Применяем форматирование к новым колонкам
+    if (sheet.getLastRow() > 1) {
+      const newColumnsRange = sheet.getRange(2, currentColumns + 1, sheet.getLastRow() - 1, columnsToAdd);
+      newColumnsRange
+        .setBackground('#ffffff')
+        .setFontColor('#000000')
+        .setFontSize(10)
+        .setVerticalAlignment('top');
+    }
+
+    SpreadsheetApp.flush();
+
+    logInfo(`✅ Добавлено ${columnsToAdd} новых колонок`);
+
+    ui.alert(
+      '✅ Обновление завершено',
+      `Успешно добавлено ${columnsToAdd} новых колонок.\n\n` +
+      'Теперь вы можете использовать функцию "Импорт товаров от поставщиков".',
+      ui.ButtonSet.OK
+    );
+
+    return {
+      success: true,
+      added: columnsToAdd,
+      message: `Добавлено ${columnsToAdd} колонок`
+    };
+
+  } catch (error) {
+    const errorMsg = `Ошибка обновления структуры: ${error.message}`;
+    logCritical(errorMsg);
+    handleError(error, 'Обновление структуры таблицы');
+
+    SpreadsheetApp.getUi().alert(
+      '❌ Ошибка',
+      `Не удалось обновить структуру таблицы:\n\n${error.message}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+
+    return {
+      success: false,
+      added: 0,
+      message: errorMsg
+    };
+  }
+}
+
+
+// ========================================
+// ФУНКЦИИ ПОДГОТОВКИ ДАННЫХ ДЛЯ INSALES
+// ========================================
+
+/**
+ * Подготовка данных товара для создания в InSales
+ *
+ * Собирает данные из строки таблицы и формирует объект для API
+ *
+ * @param {Array} row - Строка данных из таблицы
+ * @param {number} rowIndex - Индекс строки (для логирования)
+ * @param {number} categoryId - ID категории для размещения товара (опционально)
+ * @returns {Object|null} Подготовленные данные или null при ошибке
+ */
+function prepareProductDataForInsales(row, rowIndex, categoryId = null) {
+  try {
+    const article = row[IMAGES_COLUMNS.ARTICLE - 1];
+    const productName = row[IMAGES_COLUMNS.PRODUCT_NAME - 1];
+    const price = row[IMAGES_COLUMNS.PRICE - 1];
+    const stock = row[IMAGES_COLUMNS.STOCK - 1];
+    const description = row[IMAGES_COLUMNS.DESCRIPTION - 1];
+    const shortDescription = row[IMAGES_COLUMNS.SHORT_DESCRIPTION - 1];
+    const processedImages = row[IMAGES_COLUMNS.PROCESSED_IMAGES - 1];
+    const supplierImages = row[IMAGES_COLUMNS.SUPPLIER_IMAGES - 1];
+    const specificationsNormalized = row[IMAGES_COLUMNS.SPECIFICATIONS_NORMALIZED - 1];
+
+    // Валидация обязательных полей
+    if (!article || !productName) {
+      logWarning(`⚠️ Строка ${rowIndex}: Отсутствует артикул или название товара`);
+      return null;
+    }
+
+    if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+      logError(`❌ Строка ${rowIndex}: Отсутствует или некорректная цена товара "${productName}"`);
+      throw new Error(`Товар "${productName}" (${article}): отсутствует корректная цена`);
+    }
+
+    // Определяем количество товара
+    let quantity = IMPORT_SETTINGS.DEFAULT_QUANTITY_OUT_OF_STOCK; // По умолчанию 0
+
+    // Проверяем статус наличия
+    if (stock && typeof stock === 'string') {
+      const stockLower = stock.toLowerCase().trim();
+
+      // Если есть слова "в наличии", "купить", "есть" - ставим 5 шт
+      if (stockLower.includes('в наличии') ||
+          stockLower.includes('купить') ||
+          stockLower.includes('есть') ||
+          stockLower.includes('доступ')) {
+        quantity = IMPORT_SETTINGS.DEFAULT_QUANTITY_IN_STOCK;
+      }
+    } else if (stock && !isNaN(parseInt(stock))) {
+      // Если передано число - используем его
+      quantity = parseInt(stock);
+    }
+
+    // Подготавливаем изображения
+    let imageUrls = [];
+
+    // Приоритет 1: Обработанные изображения (колонка H)
+    if (processedImages && processedImages.trim()) {
+      const urls = processedImages.split('\n').map(url => url.trim()).filter(url => url.startsWith('http'));
+      if (urls.length > 0) {
+        imageUrls = urls;
+        logInfo(`  Используем ${urls.length} обработанных изображений`);
+      }
+    }
+
+    // Приоритет 2: Изображения поставщика (колонка F)
+    if (imageUrls.length === 0 && supplierImages && supplierImages.trim()) {
+      const urls = supplierImages.split('\n').map(url => url.trim()).filter(url => url.startsWith('http'));
+      if (urls.length > 0) {
+        imageUrls = urls;
+        logInfo(`  Используем ${urls.length} изображений поставщика`);
+      }
+    }
+
+    if (imageUrls.length === 0) {
+      logWarning(`⚠️ Строка ${rowIndex}: Нет изображений для товара "${productName}"`);
+    }
+
+    // Подготавливаем характеристики (properties)
+    let properties = [];
+
+    if (specificationsNormalized && specificationsNormalized.trim()) {
+      try {
+        const specsObj = JSON.parse(specificationsNormalized);
+
+        // Если это объект с ключом 'normalized'
+        if (specsObj.normalized && typeof specsObj.normalized === 'object') {
+          properties = Object.entries(specsObj.normalized).map(([title, value]) => ({
+            title: parseParameterKey(title).parameterName.replace(/^Параметр:\s*/i, ''),  // ✅ НОВОЕ: очищаем метаданные от ключа
+            value: String(value)
+          }));
+        }
+        // Если это обычный объект
+        else if (typeof specsObj === 'object' && !Array.isArray(specsObj)) {
+          properties = Object.entries(specsObj).map(([title, value]) => ({
+            title: parseParameterKey(title).parameterName.replace(/^Параметр:\s*/i, ''),  // ✅ НОВОЕ: очищаем метаданные от ключа
+            value: String(value)
+          }));
+        }
+
+        logInfo(`  Подготовлено ${properties.length} характеристик`);
+
+      } catch (parseError) {
+        logWarning(`⚠️ Не удалось распарсить характеристики для товара "${productName}": ${parseError.message}`);
+      }
+    }
+
+    // Формируем объект данных
+    const productData = {
+      // Обязательные поля
+      sku: String(article).trim(),
+      title: String(productName).trim().replace(/\*/g, 'x'),  // Заменяем "*" на "x" (англ.)
+      price: parseFloat(price),
+      quantity: quantity,
+
+      // Опциональные поля
+      description: description && description.trim() ? String(description).trim() : null,
+      shortDescription: shortDescription && shortDescription.trim() ? String(shortDescription).trim() : null,
+
+      // Массивы
+      imageUrls: imageUrls,
+      properties: properties,
+
+      // Настройки
+      categoryId: categoryId || DEFAULT_CATEGORY_ID,  // Используем переданную категорию или дефолтную
+      isHidden: IMPORT_SETTINGS.CREATE_HIDDEN
+    };
+
+    logInfo(`✅ Подготовлены данные для товара "${productName}" (${article})`, {
+      price: productData.price,
+      quantity: productData.quantity,
+      imagesCount: imageUrls.length,
+      propertiesCount: properties.length
+    });
+
+    return productData;
+
+  } catch (error) {
+    handleError(error, `Подготовка данных товара в строке ${rowIndex}`);
+    return null;
+  }
+}
+
+
+/**
+ * Чтение выбранных товаров для импорта
+ *
+ * Возвращает массив товаров с отмеченными чекбоксами
+ *
+ * @param {number} categoryId - ID категории для размещения товаров (опционально)
+ * @returns {Array<Object>} Массив объектов с данными товаров
+ */
+function readSelectedProductsForImport(categoryId = null) {
+  try {
+    logInfo('📋 Читаем выбранные товары для импорта');
+
+    const sheet = getImagesSheet();
+    const data = sheet.getDataRange().getValues();
+
+    if (data.length <= 1) {
+      logWarning('⚠️ Таблица пуста');
+      return [];
+    }
+
+    const selectedProducts = [];
+
+    // Перебираем все строки (пропускаем заголовок)
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const isChecked = row[IMAGES_COLUMNS.CHECKBOX - 1];
+
+      // Проверяем отмечен ли чекбокс
+      if (isChecked === true) {
+        const productData = prepareProductDataForInsales(row, i + 1, categoryId);
+
+        if (productData) {
+          selectedProducts.push({
+            rowIndex: i + 1, // +1 для соответствия номеру строки в Google Sheets
+            ...productData
+          });
+        }
+      }
+    }
+
+    logInfo(`✅ Найдено ${selectedProducts.length} выбранных товаров для импорта`);
+    return selectedProducts;
+
+  } catch (error) {
+    handleError(error, 'Чтение выбранных товаров для импорта');
+    return [];
+  }
+}
+
+
+/**
+ * Обновление статуса импорта товара
+ *
+ * @param {string} article - Артикул товара
+ * @param {string} status - Новый статус (из STATUS_VALUES.IMPORT)
+ * @param {string} insalesId - ID товара в InSales (опционально)
+ */
+function updateImportStatus(article, status, insalesId = null) {
+  try {
+    const sheet = getImagesSheet();
+    const data = sheet.getDataRange().getValues();
+
+    // Находим строку с артикулом
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowArticle = row[IMAGES_COLUMNS.ARTICLE - 1];
+
+      if (rowArticle && rowArticle.toString().trim() === article.toString().trim()) {
+        // Обновляем статус импорта (колонка AB)
+        sheet.getRange(i + 1, IMAGES_COLUMNS.IMPORT_STATUS).setValue(status);
+
+        // Если передан ID InSales, обновляем и его (колонка C)
+        if (insalesId) {
+          sheet.getRange(i + 1, IMAGES_COLUMNS.INSALES_ID).setValue(insalesId);
+        }
+
+        SpreadsheetApp.flush();
+        logInfo(`📝 Обновлен статус импорта для "${article}": ${status}`);
+        return true;
+      }
+    }
+
+    logWarning(`⚠️ Товар с артикулом "${article}" не найден в таблице`);
+    return false;
+
+  } catch (error) {
+    handleError(error, `Обновление статуса импорта для ${article}`);
     return false;
   }
 }

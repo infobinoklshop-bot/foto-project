@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        margin: 0;
+      }
+      h3 {
+        margin-top: 0;
+        color: #1976d2;
+      }
+      .info-box {
+        background: #e3f2fd;
+        border-left: 4px solid #1976d2;
+        padding: 12px;
+        margin-bottom: 20px;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      .search-container {
+        margin: 20px 0;
+      }
+      .search-field {
+        width: 100%;
+        padding: 12px;
+        margin: 10px 0;
+        border: 2px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .search-field:focus {
+        outline: none;
+        border-color: #1976d2;
+      }
+      .hint {
+        color: #666;
+        font-size: 12px;
+        margin: 5px 0;
+      }
+      .results {
+        margin: 20px 0;
+        max-height: 350px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      .result-item {
+        padding: 12px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .result-item:hover {
+        background: #f5f5f5;
+      }
+      .result-item:last-child {
+        border-bottom: none;
+      }
+      .result-title {
+        font-weight: bold;
+        color: #333;
+        margin-bottom: 4px;
+      }
+      .result-path {
+        font-size: 12px;
+        color: #666;
+      }
+      .result-stats {
+        font-size: 11px;
+        color: #999;
+        margin-top: 4px;
+      }
+      .selected-info {
+        background: #f1f8f4;
+        border: 1px solid #4caf50;
+        padding: 12px;
+        margin: 15px 0;
+        border-radius: 4px;
+        display: none;
+      }
+      .selected-info.visible {
+        display: block;
+      }
+      .selected-info-title {
+        font-weight: bold;
+        color: #2e7d32;
+        margin-bottom: 6px;
+      }
+      .selected-info-detail {
+        font-size: 12px;
+        color: #555;
+        line-height: 1.6;
+      }
+      .buttons {
+        margin-top: 20px;
+        text-align: right;
+        border-top: 1px solid #eee;
+        padding-top: 15px;
+      }
+      button {
+        padding: 10px 20px;
+        margin-left: 10px;
+        cursor: pointer;
+        border: none;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      .btn-cancel {
+        background: #f1f3f4;
+        color: #333;
+      }
+      .btn-cancel:hover {
+        background: #e0e0e0;
+      }
+      .primary {
+        background: #4caf50;
+        color: white;
+      }
+      .primary:hover {
+        background: #45a049;
+      }
+      .primary:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .loading {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+      }
+      .no-results {
+        text-align: center;
+        padding: 40px;
+        color: #999;
+      }
+      .selected {
+        background: #e3f2fd !important;
+        border-left: 3px solid #1976d2;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>📂 Выбрать категорию для импорта</h3>
+
+    <div class="info-box">
+      📦 Товаров для импорта: <strong><?= productCount ?></strong>
+    </div>
+
+    <div class="search-container">
+      <input
+        type="text"
+        id="searchInput"
+        class="search-field"
+        placeholder="Введите название категории..."
+        autocomplete="off"
+      >
+      <div class="hint">
+        💡 Можно искать по части названия или вводить "/" для поиска корневых категорий
+      </div>
+    </div>
+
+    <div id="results" class="results">
+      <div class="loading">Загрузка категорий из InSales...</div>
+    </div>
+
+    <div id="selectedInfo" class="selected-info">
+      <div class="selected-info-title">✅ Выбрана категория:</div>
+      <div id="selectedInfoContent" class="selected-info-detail"></div>
+    </div>
+
+    <div class="buttons">
+      <button class="btn-cancel" onclick="google.script.host.close()">
+        Отмена
+      </button>
+      <button
+        id="selectBtn"
+        class="primary"
+        onclick="confirmSelection()"
+        disabled
+      >
+        Создать товары в категориях
+      </button>
+    </div>
+
+    <script>
+      // Параметры, переданные из серверной части
+      const productCount = <?= productCount ?>;
+
+      let allCategories = [];
+      let selectedCategories = [];  // ИЗМЕНЕНО: массив для множественного выбора
+
+      // Загружаем категории при открытии
+      window.onload = function() {
+        loadCategories();
+
+        // Поиск при вводе
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+          performSearch(e.target.value);
+        });
+
+        // Enter для поиска
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+          if (e.key === 'Enter') {
+            performSearch(e.target.value);
+          }
+        });
+
+        // Фокус на поле поиска
+        document.getElementById('searchInput').focus();
+      };
+
+      function loadCategories() {
+        google.script.run
+          .withSuccessHandler(function(categories) {
+            allCategories = categories;
+            console.log('Загружено категорий:', categories.length);
+
+            // Показываем все категории по умолчанию
+            displayCategories(categories);
+          })
+          .withFailureHandler(function(error) {
+            showError('Ошибка загрузки категорий: ' + error.message);
+          })
+          .getCategoriesForImport();
+      }
+
+      function displayCategories(categories) {
+        const resultsDiv = document.getElementById('results');
+
+        if (!categories || categories.length === 0) {
+          resultsDiv.innerHTML = '<div class="no-results">😔 Категории не найдены</div>';
+          return;
+        }
+
+        let html = '';
+        categories.forEach((cat, index) => {
+          const indent = '&nbsp;&nbsp;'.repeat(cat.level || 0);
+          const prefix = (cat.level || 0) > 0 ? '└─ ' : '';
+
+          html += `
+            <div class="result-item" onclick="toggleCategory(${index})" id="result_${index}">
+              <input type="checkbox" id="checkbox_${index}" style="margin-right: 8px;" onclick="event.stopPropagation(); toggleCategory(${index});">
+              <div class="result-title" style="display: inline-block;">
+                ${indent}${prefix}${cat.title}
+              </div>
+              <div class="result-path">📂 ${cat.path || cat.title}</div>
+              <div class="result-stats">
+                🔑 ID: ${cat.id}
+              </div>
+            </div>
+          `;
+        });
+
+        resultsDiv.innerHTML = html;
+        window.displayedCategories = categories;
+      }
+
+      function performSearch(query) {
+        if (!query || query.length < 2) {
+          // Показываем все категории если запрос пустой
+          displayCategories(allCategories);
+          return;
+        }
+
+        const searchQuery = query.toLowerCase();
+        const filtered = allCategories.filter(cat =>
+          cat.title.toLowerCase().includes(searchQuery) ||
+          (cat.path && cat.path.toLowerCase().includes(searchQuery)) ||
+          cat.id.toString().includes(searchQuery)
+        );
+
+        displayCategories(filtered);
+      }
+
+      function toggleCategory(index) {
+        const category = window.displayedCategories[index];
+        const checkbox = document.getElementById('checkbox_' + index);
+        const resultItem = document.getElementById('result_' + index);
+
+        // Переключаем состояние чекбокса
+        checkbox.checked = !checkbox.checked;
+
+        if (checkbox.checked) {
+          // Добавляем в список выбранных
+          if (!selectedCategories.find(c => c.id === category.id)) {
+            selectedCategories.push(category);
+            resultItem.classList.add('selected');
+          }
+        } else {
+          // Убираем из списка выбранных
+          selectedCategories = selectedCategories.filter(c => c.id !== category.id);
+          resultItem.classList.remove('selected');
+        }
+
+        // Обновляем отображение выбранных категорий
+        updateSelectedInfo();
+
+        // Активируем/деактивируем кнопку
+        document.getElementById('selectBtn').disabled = selectedCategories.length === 0;
+      }
+
+      function updateSelectedInfo() {
+        const infoDiv = document.getElementById('selectedInfo');
+        const contentDiv = document.getElementById('selectedInfoContent');
+
+        if (selectedCategories.length === 0) {
+          infoDiv.classList.remove('visible');
+          return;
+        }
+
+        let html = selectedCategories.map(cat => `
+          <div style="margin-bottom: 4px;">
+            <strong>${cat.title}</strong><br>
+            <span style="font-size: 11px;">📂 ${cat.path} | 🔑 ${cat.id}</span>
+          </div>
+        `).join('');
+
+        contentDiv.innerHTML = `
+          <div style="margin-bottom: 6px;"><strong>Выбрано категорий: ${selectedCategories.length}</strong></div>
+          ${html}
+        `;
+
+        infoDiv.classList.add('visible');
+      }
+
+      function confirmSelection() {
+        if (selectedCategories.length === 0) {
+          alert('Выберите хотя бы одну категорию');
+          return;
+        }
+
+        console.log('Выбрано категорий:', selectedCategories);
+
+        // Отключаем кнопку и показываем процесс
+        const selectBtn = document.getElementById('selectBtn');
+        selectBtn.disabled = true;
+        selectBtn.textContent = 'Создание товаров...';
+
+        // Извлекаем только ID категорий
+        const categoryIds = selectedCategories.map(c => c.id);
+
+        // Запускаем импорт с несколькими категориями
+        google.script.run
+          .withSuccessHandler(function(result) {
+            console.log('Результат:', result);
+            // Закрываем диалог после успешного старта
+            google.script.host.close();
+          })
+          .withFailureHandler(function(error) {
+            alert('Ошибка: ' + error.message);
+            selectBtn.disabled = false;
+            selectBtn.textContent = 'Создать товары в категориях';
+          })
+          .startProductImportWithCategories(categoryIds);
+      }
+
+      function showError(message) {
+        document.getElementById('results').innerHTML =
+          '<div class="no-results">❌ ' + message + '</div>';
+      }
+    </script>
+  </body>
+</html>

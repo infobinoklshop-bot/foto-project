@@ -4,353 +4,298 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **Google Apps Script** project for automated product image processing and e-commerce integration. The system manages product images from InSales, parses images from competitor suppliers, and uses AI for SEO optimization (alt-tags and filenames).
+**Google Apps Script** проект для автоматизации обработки изображений товаров и интеграции с e-commerce. Система управляет изображениями из InSales, парсит данные от поставщиков и использует AI для SEO-оптимизации.
 
-**Key Technologies:**
-- Google Apps Script (JavaScript runtime for Google Sheets)
-- InSales API integration
-- OpenAI GPT-4 Vision API
-- Web scraping (UrlFetchApp)
-- Google Script Properties for secure credential storage
+**Технологии:** Google Apps Script, InSales API, OpenAI GPT-4 Vision, Web scraping (UrlFetchApp)
 
-## Development Environment
+**Runtime:** V8 | **Timezone:** Europe/Moscow
 
-### Deployment Method
-This project uses [clasp](https://github.com/google/clasp) for deployment:
+## Quick Reference
+
+### Команды разработки (clasp)
 ```bash
-# Push changes to Google Apps Script
-clasp push
-
-# Pull changes from remote
-clasp pull
-
-# Open project in browser
-clasp open
+clasp push          # Деплой в Google Apps Script
+clasp pull          # Получить удалённые изменения
+clasp open          # Открыть проект в браузере
 ```
 
-### Testing
-Since this is Google Apps Script, there is no traditional test suite. Testing is done via:
-1. Running functions directly in Google Apps Script IDE (`Script Editor` → `Run`)
-2. Using the Google Sheets menu: `🖼️ Фото` → `⚙️ Проверить настройки API`
-3. Test functions exist in each module (e.g., `testConfigModule()`)
+### Точки входа меню (99_menu.js)
+| Пункт меню | Функция | Модуль |
+|-----------|----------|--------|
+| 📥 Загрузить товары | `loadProductsFromInSalesMenu()` | 03_insales_api |
+| 🔍 Спарсить у поставщиков | `showSupplierParsingDialog()` | 05_supplier_parsing |
+| 🆕 Импорт товаров | `showFullProductImportDialog()` | 05_supplier_parsing |
+| 🤖 Обработать изображения | `showImageSelectionForProcessing()` | 04_image_processing |
+| 🔄 Управление параметрами | `showUnifiedParameterDialog()` | 06_specification_normalizer |
+| 📤 Создать в InSales | `createProductsInInsalesMenu()` | 03_insales_api |
 
-### Viewing Logs
-```javascript
-// In Google Apps Script IDE
-View → Execution log
-
-// Or use Stackdriver Logging
-View → Stackdriver Logging
-```
+### Тестирование
+- Запуск функций: Apps Script IDE → `Run`
+- Проверка настроек: Меню `🖼️ Фото` → `⚙️ Проверить настройки API`
+- Логи: Apps Script IDE → `View` → `Execution log`
 
 ## Architecture
 
-### Module Structure
+### Модульная структура
 
-The codebase follows a **hierarchical dependency model** with numbered prefixes indicating load order:
+Нумерация файлов определяет порядок загрузки и зависимости (выше → ниже):
 
 ```
-00_config.gs.js          → Configuration, constants, API settings
-01_shared_utilities.js   → Logging, error handling, Sheets helpers
-02_data_manager.js       → Google Sheets CRUD operations
-03_insales_api.js        → InSales platform integration
-04_image_processing.js   → OpenAI GPT-4 Vision integration
-05_supplier_parsing.gs.js→ Web scraping from suppliers
-99_menu.js               → UI menu and workflow orchestration
-*.html                   → Dialog UIs (HtmlService)
+00_config.gs.js              → Константы, настройки API
+1_shared_utilities.js        → Логирование, обработка ошибок
+02_data_manager.js           → CRUD операции Google Sheets
+03_insales_api.js            → Интеграция с InSales
+04_image_processing.js       → OpenAI GPT-4 Vision
+05_supplier_parsing.gs.js    → Парсинг поставщиков (Veber, Sturman)
+06_specification_normalizer.js → Нормализация характеристик
+07_description_ai.js         → AI-рерайт описаний (3 ассистента)
+08_product_matcher.js        → Поиск дубликатов
+99_menu.js                   → UI меню и оркестрация
+*.html                       → Диалоги (HtmlService)
+data/                        → CSV бэкапы, JSON справочники
 ```
 
-**Dependency Rule:** Higher-numbered modules can depend on lower-numbered modules, never the reverse.
+### Структура данных (Google Sheet)
 
-### Key Data Model
+**Основные колонки (A-L):**
+| Колонка | Константа | Назначение |
+|---------|-----------|------------|
+| A | CHECKBOX | Выбор товаров |
+| B | ARTICLE | Артикул (primary key) |
+| C | INSALES_ID | ID в InSales |
+| D | PRODUCT_NAME | Название |
+| E | ORIGINAL_IMAGES | URL из InSales (\\n-separated) |
+| F | SUPPLIER_IMAGES | URL от поставщиков |
+| G | ADDITIONAL_IMAGES | Доп. фото |
+| H | PROCESSED_IMAGES | Обработанные |
+| I | ALT_TAGS | Alt-теги |
+| J | SEO_FILENAMES | SEO имена файлов |
+| K | PROCESSING_STATUS | Статус обработки |
+| L | INSALES_STATUS | Статус отправки |
 
-The system operates on a single Google Sheet with this structure:
+**Расширенные колонки для импорта (M-AB):**
+| Колонка | Константа | Назначение |
+|---------|-----------|------------|
+| M-O | DESCRIPTION, DESCRIPTION_REWRITTEN, SHORT_DESCRIPTION | Описания |
+| P-Q | SPECIFICATIONS_RAW, SPECIFICATIONS_NORMALIZED | Характеристики (JSON) |
+| R-Y | PRICE, STOCK, CATEGORIES, BRAND, SERIES, WEIGHT, DIMENSIONS, PACKAGE_CONTENTS | Данные товара |
+| Z-AB | MATCH_STATUS, MATCH_CONFIDENCE, IMPORT_STATUS | Статусы импорта |
 
-| Column | Name | Purpose |
-|--------|------|---------|
-| A | CHECKBOX | User selection for batch operations |
-| B | ARTICLE | Product SKU (primary key) |
-| C | INSALES_ID | Product ID in InSales |
-| D | PRODUCT_NAME | Full product title |
-| E | ORIGINAL_IMAGES | URLs from InSales (newline-separated) |
-| F | SUPPLIER_IMAGES | Parsed from suppliers (newline-separated) |
-| G | ADDITIONAL_IMAGES | User-added images |
-| H | PROCESSED_IMAGES | Enhanced/uploaded images |
-| I | ALT_TAGS | SEO alt-text (newline-separated) |
-| J | SEO_FILENAMES | SEO filenames (newline-separated) |
-| K | PROCESSING_STATUS | Current processing state |
-| L | INSALES_STATUS | Upload status |
+Доступ через константы: `IMAGES_COLUMNS.ARTICLE`, `IMAGES_COLUMNS.ALT_TAGS` и т.д.
 
-Access columns via constants: `IMAGES_COLUMNS.ARTICLE`, `IMAGES_COLUMNS.ALT_TAGS`, etc.
+## Main Workflows
 
-### Main Workflows
-
-#### 1. Loading Products from InSales
-```javascript
-// Entry: 99_menu.js → loadProductsFromInSalesMenu()
-// Flow:
-03_insales_api → loadProductsFromInSales()
-  → loadCatalogStructure()        // Get categories
-  → loadProductsFromCategory()    // Paginated fetch (250/page)
-  → loadProductVariants()         // Extract SKUs from variants
-  → syncProductData()             // Write to Sheets
-    → 02_data_manager → writeProductData()
+### 1. Обработка изображений
+```
+loadProductsFromInSalesMenu() → Загрузка товаров из InSales
+    ↓
+showSupplierParsingDialog() → Парсинг доп. изображений (опционально)
+    ↓
+showImageSelectionForProcessing() → AI генерирует alt-теги и SEO-имена
+    ↓
+sendProcessedImagesToInSales() → Загрузка обратно в InSales
 ```
 
-**Important:** Always get article numbers from `variant.sku`, not `product.sku`.
-
-#### 2. Parsing Supplier Images
-```javascript
-// Entry: 99_menu.js → showSupplierParsingDialog()
-// Flow:
-05_supplier_parsing → runSupplierParsing()
-  → executeSupplierParser()       // For each enabled supplier
-    → parse<Supplier>Images()     // Scrape product pages
-  → saveSelectedImages()          // Store URLs in sheet
+### 2. Полный импорт товаров
+```
+showFullProductImportDialog() → Ввод артикулов, выбор поставщика
+    ↓
+parseVeberFullProduct() / parseSturmanFullProduct() → Парсинг карточки
+    ↓
+normalizeSpecifications() → Нормализация характеристик по справочнику
+    ↓
+generateProductDescription() → AI-рерайт описания (Copier → Editor)
+    ↓
+checkProductDuplicate() → Проверка дубликатов
+    ↓
+writeFullProductData() → Запись в таблицу (колонки M-AB)
+    ↓
+createProductsInInsalesMenu() → Создание товаров в InSales
 ```
 
-#### 3. AI Image Analysis
-```javascript
-// Entry: 99_menu.js → showImageSelectionForProcessing()
-// Flow:
-04_image_processing → processSelectedImages()
-  → analyzeImageSimple()
-    → callOpenAIVision()          // GPT-4 Vision API
-  → generateAltTag()              // Max 125 chars, no stop words
-  → generateSeoFilename()         // Latin chars only, max 80 chars
-  → 02_data_manager → Update sheet
-```
+### 3. Управление параметрами (UnifiedParameterDialog)
+Диалог с двумя вкладками:
+- **📦 Товар**: Маппинг параметров конкретного товара
+- **📋 Все ненормализованные**: Массовая обработка ошибок enum
 
 ## Configuration
 
-### API Keys Setup
-
-All credentials are stored in **Script Properties** (never in code):
+### API ключи (Script Properties)
 
 ```javascript
-// View/set via Apps Script IDE:
-Project Settings → Script Properties
-
-// Or programmatically:
+// Просмотр/установка: Apps Script IDE → Project Settings → Script Properties
 const properties = PropertiesService.getScriptProperties();
-properties.setProperty(SCRIPT_PROPERTIES_KEYS.INSALES_API_KEY, 'your_key');
+properties.setProperty('insalesApiKey', 'your_key');
 ```
 
-**Required Keys:**
-- `insalesApiKey` - InSales API key
-- `insalesPassword` - InSales API password
-- `insalesShop` - InSales shop subdomain (e.g., "myshop")
+**Обязательные:**
+- `insalesApiKey`, `insalesPassword`, `insalesShop` — InSales API
+- `openaiApiKey` — OpenAI (для AI обработки)
 
-**Optional Keys:**
-- `openaiApiKey` - For image analysis
-- `replicateToken` - For image upscaling (stub)
-- `tinypngKey` - For compression (stub)
-- `imgbbKey` - For image hosting (stub)
-- `telegramToken`, `telegramChatId` - For notifications
+**AI Assistants (hardcoded в 07_description_ai.js):**
+- `AI_ASSISTANTS.COPIER` — Генерация описаний
+- `AI_ASSISTANTS.EDITOR` — Редактирование
 
-### Validation
+**Опциональные:** `replicateToken`, `tinypngKey`, `imgbbKey`, `telegramToken`
 
-Always validate configuration before operations:
+## Specification Normalization System
+
+### Двухэтапный процесс (порядок критичен!)
+
 ```javascript
-const validation = validateConfig();
-if (!validation.isValid) {
-  console.log('Errors:', validation.errors);
+// 1️⃣ Кастомный нормализатор (если указан в справочнике)
+if (normalizerName && NORMALIZER_FUNCTIONS[normalizerName]) {
+  normalizedValue = NORMALIZER_FUNCTIONS[normalizerName](value);
+  // "да" → "Влагозащищенный"
+}
+
+// 2️⃣ Enum matching (проверка допустимых значений)
+if (fieldType === 'enum' && allowedValues) {
+  normalizedValue = normalizeEnumValue(normalizedValue, allowedValues);
 }
 ```
 
-## Common Patterns
+**Важно:** Если поменять порядок — сырые значения не пройдут через нормализатор.
 
-### Error Handling
+### Справочник параметров
+
+Лист `SHEET_NAMES.SPEC_REFERENCE` ("Справочник параметров"):
+
+| Колонка | Назначение |
+|---------|------------|
+| B | Параметр (каноническое имя) |
+| C | Тип (enum/число/текст) |
+| D | Допустимые значения (для enum) |
+| F-G | Синонимы Veber / Sturman |
+| H | Функция нормализации |
+
+### UNNORMALIZED_VALUES
+
+Хранит значения, не прошедшие enum-валидацию:
 ```javascript
-try {
-  // Your code
-} catch (error) {
-  handleError(error, 'Context description', {
-    additionalInfo: 'for debugging'
-  });
-}
+UNNORMALIZED_VALUES.add(paramName, rawValue, allowedValues, supplierField, article);
+UNNORMALIZED_VALUES.getAll();  // Для диалога "Ненормализованные значения"
 ```
 
-### Logging
-```javascript
-logInfo('Operation started', {data: 'context'});
-logWarning('Non-critical issue detected');
-logError('Error occurred', errorObject);
-logCritical('System failure'); // Sends Telegram notification
-```
+### Ре-нормализация
 
-### Reading from Sheets
-```javascript
-const sheet = getImagesSheet(); // Safe accessor with validation
-const data = sheet.getDataRange().getValues();
-const headers = data[0];
-const rows = data.slice(1);
+После изменения справочника вызовите `renormalizeProduct(article)` — перечитает `SPECIFICATIONS_RAW` (колонка P) и пересчитает `SPECIFICATIONS_NORMALIZED` (колонка Q).
 
-// Or use data manager:
-const products = readSelectedProducts(); // Gets checked items
-```
+### Troubleshooting нормализации
 
-### Writing to Sheets
-```javascript
-// Single product:
-writeProductData({
-  article: 'SKU123',
-  productName: 'Product Name',
-  originalImages: 'url1\nurl2',
-  processingStatus: STATUS_VALUES.PROCESSING.COMPLETED
-});
-
-// Update status only:
-updateProductStatus('SKU123', STATUS_VALUES.INSALES.SENT);
-```
-
-### API Requests with Retry Logic
-```javascript
-const response = makeInsalesRequest(
-  'GET',
-  '/admin/products.json',
-  null,
-  {per_page: 250, page: 1}
-);
-// Automatically handles: auth, pagination, rate limits (429), retries
-```
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| "Не найдено совпадение для enum" | Пустой normalizer в колонке H | Заполнить имя функции |
+| Изменения не применяются | Нужна ре-нормализация | `renormalizeProduct(article)` |
+| "JSON НЕВАЛИДЕН" | Колонка P не JSON | Переимпортировать товар |
+| Артикул не найден | Тип данных (string vs number) | Проверить логи |
 
 ## Important Implementation Details
 
-### SKU Extraction
-**Always** extract article numbers from product variants, not the product itself:
+### SKU из вариантов
 ```javascript
-// CORRECT:
+// ПРАВИЛЬНО: артикул из варианта
 const article = variant.sku;
 
-// WRONG:
-const article = product.sku; // Often empty or incorrect
+// НЕПРАВИЛЬНО: product.sku часто пустой
+const article = product.sku;
 ```
 
-### Image URL Validation
+### Многострочные данные
 ```javascript
-// Always validate before storing:
-if (url && url.startsWith('http')) {
-  // Safe to store
-}
-```
+// Запись
+const stored = imageUrls.join('\n');
 
-### Multi-line Data Storage
-Images, alt-tags, and filenames are stored as newline-separated strings:
-```javascript
-const imageUrls = ['url1', 'url2', 'url3'];
-const storedValue = imageUrls.join('\n');
-
-// Reading:
-const imageArray = cellValue.split('\n').filter(url => url.trim());
+// Чтение
+const urls = cellValue.split('\n').filter(url => url.trim());
 ```
 
 ### Rate Limiting
 ```javascript
-// For supplier parsing, respect rate limits:
-Utilities.sleep(1000); // 1 second between requests
+Utilities.sleep(1000);  // 1 сек между запросами парсинга
 
-// For API calls, use exponential backoff on 429:
+// Для API — экспоненциальный backoff при 429
 if (responseCode === 429) {
   Utilities.sleep(Math.pow(2, attempt) * 1000);
 }
 ```
 
-### Transliteration for SEO
-```javascript
-// Russian to Latin for filenames:
-const latinFilename = transliterate(russianText);
-// Removes special chars, max 80 chars, lowercase
-```
-
-### Batch Processing Limits
-- Process max **50 products per batch** to avoid Google Apps Script 6-minute execution timeout
-- Use `SpreadsheetApp.flush()` periodically to save changes
+### Лимиты
+- **Batch**: max 50 товаров (6-минутный таймаут Apps Script)
+- **Full import**: max 30 товаров (AI обработка ~2 мин/товар)
+- **URLFetch**: 20,000 запросов/день
 
 ## Adding New Features
 
-### Adding a New Supplier Parser
-1. Add to `SUPPLIERS_CONFIG` in [05_supplier_parsing.gs.js](05_supplier_parsing.gs.js):
+### Новый парсер поставщика
+1. Добавить в `SUPPLIERS_CONFIG` (05_supplier_parsing.gs.js)
+2. Реализовать `parseNewSupplierImages(url)`
+3. Добавить case в `executeSupplierParser()`
+
+### Новая колонка
+1. Добавить в `IMAGES_COLUMNS` (00_config.gs.js)
+2. Обновить `setupHeaders()` (02_data_manager.js)
+3. Обновить read/write функции
+
+### Новый нормализатор
 ```javascript
-NEW_SUPPLIER: {
-  name: 'Supplier Name',
-  enabled: true,
-  searchUrl: (article) => `https://example.com/search?q=${article}`,
-  selectors: {
-    images: 'img.product-image',
-    excludePatterns: ['logo', 'banner']
-  }
+// 06_specification_normalizer.js
+NORMALIZER_FUNCTIONS.myNormalizer = (value) => transformedValue;
+```
+Затем указать `myNormalizer` в колонке H справочника.
+
+### Новый HTML диалог
+```html
+<!-- MyDialog.html -->
+<!DOCTYPE html>
+<html>
+<head><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-gray-900 text-gray-100 p-6">
+  <div id="loading">Loading...</div>
+  <div id="main" class="hidden"><!-- UI --></div>
+  <script>
+    google.script.run
+      .withSuccessHandler(data => {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('main').classList.remove('hidden');
+      })
+      .yourServerFunction();
+  </script>
+</body>
+</html>
+```
+
+```javascript
+// 99_menu.js
+function showMyDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('MyDialog')
+    .setWidth(800).setHeight(600);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Title');
 }
 ```
 
-2. Implement parser function:
-```javascript
-function parseNewSupplierImages(url) {
-  try {
-    const html = UrlFetchApp.fetch(url).getContentText();
-    // Extract images using regex or XML parsing
-    return imageUrls;
-  } catch (error) {
-    handleError(error, 'Parse New Supplier');
-    return [];
-  }
-}
-```
-
-3. Add case to `executeSupplierParser()` switch statement
-
-### Adding New Columns
-1. Update `IMAGES_COLUMNS` in [00_config.gs.js](00_config.gs.js:62)
-2. Modify `setupHeaders()` in [02_data_manager.js](02_data_manager.js)
-3. Update read/write logic in data manager functions
-4. Adjust column widths in `setupColumnWidths()`
-
-## Debugging Tips
-
-### Common Issues
-
-**"Лист не найден" (Sheet not found):**
-- Ensure sheet name matches `SHEET_NAMES.IMAGES` exactly
-- Run `createImagesSheet()` to initialize structure
-
-**"Authorization required":**
-- Check Script Properties contain all required API keys
-- Validate with `validateConfig()`
-
-**API Rate Limits (429):**
-- Already handled by `makeInsalesRequest()` with exponential backoff
-- For custom requests, add `Utilities.sleep()` between calls
-
-**Execution Timeout:**
-- Reduce batch size (max 50 items)
-- Split workflow into smaller functions
-- Use Google Apps Script triggers for long operations
-
-**Empty SKUs:**
-- Check that `loadProductVariants()` is called
-- Verify variants exist in InSales product data
-
-## Google Apps Script Limitations
-
-- **6-minute execution timeout** per function call
-- **No native async/await** (use sequential processing)
-- **Single-threaded** execution model
-- **URLFetch quotas**: 20,000 calls/day
-- **Cannot render JavaScript** during web scraping
-- **No file system access** (must upload to external services)
+**UI темы:** Dark (bg-gray-900) для большинства диалогов, Light (bg-white) для UnifiedParameterDialog.
 
 ## Code Style
 
-- **Language:** Russian comments and variable names (mixed with English APIs)
-- **Logging:** Always use emoji prefixes (✅ success, ❌ error, ⚠️ warning, 📝 info)
-- **Error messages:** Russian language for end-user display
-- **Constants:** UPPERCASE_SNAKE_CASE
-- **Functions:** camelCase
-- **Status values:** Use constants from `STATUS_VALUES` object
+- **Язык:** Русские комментарии, английские API
+- **Логи:** Emoji-префиксы (✅ ❌ ⚠️ 📝)
+- **Константы:** UPPERCASE_SNAKE_CASE
+- **Функции:** camelCase
+- **Статусы:** Использовать `STATUS_VALUES` объект
+
+## Files Reference
+
+| Файл | Назначение |
+|------|------------|
+| `.clasp.json` | Конфигурация clasp (scriptId) |
+| `appsscript.json` | Манифест Apps Script (runtime V8, timezone) |
+| `data/JSON-справочник.json` | Справочник параметров (JSON) |
+| `data/*.csv` | CSV бэкапы таблиц |
 
 ## Resources
 
-- **InSales API Docs:** https://www.insales.ru/collection/api
-- **Google Apps Script Reference:** https://developers.google.com/apps-script/reference
-- **OpenAI Vision API:** https://platform.openai.com/docs/guides/vision
-- **clasp Documentation:** https://github.com/google/clasp
+- [InSales API](https://www.insales.ru/collection/api)
+- [Google Apps Script](https://developers.google.com/apps-script/reference)
+- [OpenAI Vision API](https://platform.openai.com/docs/guides/vision)
+- [clasp](https://github.com/google/clasp)

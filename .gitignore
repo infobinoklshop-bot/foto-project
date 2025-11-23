@@ -1,0 +1,36 @@
+# Credentials (НИКОГДА не коммитить!)
+.credentials/
+*.json
+
+# Google Apps Script
+.clasp.json
+
+# Node modules (если будут)
+node_modules/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Gemini libraries (Python - не для Apps Script)
+.gemini_libs/
+
+# Python cache
+__pycache__/
+*.py
+
+# Memory bank context (локальный)
+memory-bank-context/
+
+# Старые файлы диалогов
+*.old
