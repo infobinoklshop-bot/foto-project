@@ -1766,14 +1766,19 @@ function prepareProductDataForInsales(row, rowIndex, categoryId = null) {
 
       // Настройки
       categoryId: categoryId || DEFAULT_CATEGORY_ID,  // Используем переданную категорию или дефолтную
-      isHidden: IMPORT_SETTINGS.CREATE_HIDDEN
+      isHidden: IMPORT_SETTINGS.CREATE_HIDDEN,
+
+      // ✅ ИСПРАВЛЕНИЕ: передаём specificationsNormalized для извлечения веса и габаритов
+      // Используется в buildVariantAttributes() для заполнения weight, width, depth, height
+      specificationsNormalized: specificationsNormalized && specificationsNormalized.trim() ? specificationsNormalized : null
     };
 
     logInfo(`✅ Подготовлены данные для товара "${productName}" (${article})`, {
       price: productData.price,
       quantity: productData.quantity,
       imagesCount: imageUrls.length,
-      propertiesCount: properties.length
+      propertiesCount: properties.length,
+      hasSpecsForWeightDimensions: !!productData.specificationsNormalized
     });
 
     return productData;

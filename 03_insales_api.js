@@ -1156,24 +1156,16 @@ async function createProductInInSales(productData) {
         // Характеристики
         characteristics: buildCharacteristicsForInSales(productData.specificationsNormalized),
 
-        // Вес и габариты
-        weight: parseFloat(productData.weight) || null,
-        dimensions: productData.dimensions || null,
-
         // Комплектация
         package_contents: productData.packageContents || null,
 
         // Бренд (как custom field)
         fields_values_attributes: buildCustomFields(productData),
 
-        // Варианты товара с артикулом
+        // Варианты товара с артикулом, весом и габаритами
+        // ВАЖНО: вес и габариты относятся к варианту, а не к товару!
         variants_attributes: [
-          {
-            sku: productData.article,
-            price: parseFloat(productData.price) || 0,
-            quantity: parseInt(productData.stock) || 0,
-            available: true
-          }
+          buildVariantAttributes(productData)
         ]
       }
     };
@@ -1285,6 +1277,173 @@ function buildCustomFields(productData) {
   }
 
   return fields;
+}
+
+
+/**
+ * ФОРМИРОВАНИЕ АТРИБУТОВ ВАРИАНТА С ВЕСОМ И ГАБАРИТАМИ
+ *
+ * InSales API требует передавать вес и габариты в variants_attributes:
+ * - weight: вес в КИЛОГРАММАХ
+ * - width, depth, height: габариты в САНТИМЕТРАХ
+ *
+ * Источники данных из справочника параметров:
+ * - Вес: "Параметр: Вес в упаковке, кг" (синонимы: "Вес в упаковке", "Вес с упаковкой")
+ * - Габариты: "Параметр: Размер упаковки (ДхШхВ), мм" (формат: ДлинаxШиринаxВысота в мм)
+ *
+ * @param {Object} productData - Данные товара
+ * @returns {Object} Атрибуты варианта для InSales API
+ */
+function buildVariantAttributes(productData) {
+  const variant = {
+    sku: productData.article,
+    price: parseFloat(productData.price) || 0,
+    quantity: parseInt(productData.stock) || 0,
+    available: true
+  };
+
+  // Извлекаем вес и габариты из нормализованных спецификаций
+  let specs = {};
+  if (productData.specificationsNormalized) {
+    try {
+      specs = typeof productData.specificationsNormalized === 'string'
+        ? JSON.parse(productData.specificationsNormalized)
+        : productData.specificationsNormalized;
+    } catch (e) {
+      logWarning('⚠️ Не удалось распарсить спецификации для веса/габаритов');
+    }
+  }
+
+  // Обработка веса
+  // Ищем "Вес упаковки" в нормализованных спецификациях
+  // ВАЖНО: ключи в JSON БЕЗ префикса "Параметр:", например "Вес упаковки": "1.66"
+  const weightValue = findSpecValue(specs, [
+    'Вес упаковки',
+    'Вес в упаковке',
+    'Вес с упаковкой',
+    'Параметр: Вес в упаковке, кг',
+    'Параметр: Вес упаковки'
+  ]);
+
+  if (weightValue) {
+    const weightKg = parseWeight(weightValue);
+    if (weightKg > 0) {
+      variant.weight = weightKg;
+      logInfo(`📦 Вес для доставки: ${weightKg} кг`);
+    }
+  }
+
+  // Обработка габаритов
+  // InSales API принимает габариты как СТРОКУ в формате "ШхГхВ" (Ширина×Глубина×Высота)
+  // Документация: https://www.insales.ru/collection/doc-prochee/product/javascript-api-oformleniya-zakaza-dlya-vneshnih-sposobov-dostavki
+  // Пример: "dimensions": "10х20х15" (значения в СМ)
+  const dimensionsValue = findSpecValue(specs, [
+    'Размер упаковки (ДхШхВ)',
+    'Размер упаковки (ДхШхВ), мм',
+    'Размер упаковки',
+    'Габариты упаковки',
+    'Параметр: Размер упаковки (ДхШхВ), мм',
+    'Параметр: Размер упаковки (ДхШхВ)'
+  ]);
+
+  if (dimensionsValue) {
+    const dims = parseDimensionsMm(dimensionsValue);
+    if (dims) {
+      // Конвертируем мм → см и формируем строку в формате InSales: "ДхШхВ"
+      // В справочнике данные в формате "ДхШхВ" (длина, ширина, высота) в мм
+      // InSales ожидает "ДхШхВ" (длина, ширина, высота) в см
+      const lengthCm = Math.round(dims.length / 10); // Д - длина (depth в InSales)
+      const widthCm = Math.round(dims.width / 10);   // Ш - ширина
+      const heightCm = Math.round(dims.height / 10); // В - высота
+
+      // Используем кириллическую "х" как в документации InSales
+      variant.dimensions = `${lengthCm}х${widthCm}х${heightCm}`;
+      logInfo(`📐 Габариты для доставки: ${variant.dimensions} см (ДхШхВ)`);
+    }
+  }
+
+  return variant;
+}
+
+
+/**
+ * Поиск значения в спецификациях по списку возможных ключей
+ */
+function findSpecValue(specs, keys) {
+  if (!specs || typeof specs !== 'object') return null;
+
+  for (const key of keys) {
+    if (specs[key] !== undefined && specs[key] !== null && specs[key] !== '') {
+      return specs[key];
+    }
+  }
+
+  // Поиск по частичному совпадению ключа
+  const specKeys = Object.keys(specs);
+  for (const key of keys) {
+    const found = specKeys.find(k =>
+      k.toLowerCase().includes(key.toLowerCase()) ||
+      key.toLowerCase().includes(k.toLowerCase())
+    );
+    if (found && specs[found]) {
+      return specs[found];
+    }
+  }
+
+  return null;
+}
+
+
+/**
+ * Парсинг веса из строки
+ * Поддерживает форматы: "2.4", "2,4", "2.4 кг", "2400 г"
+ * @returns {number} Вес в килограммах
+ */
+function parseWeight(value) {
+  if (!value) return 0;
+
+  const str = String(value).trim().toLowerCase();
+
+  // Извлекаем число
+  const match = str.match(/([\d.,]+)/);
+  if (!match) return 0;
+
+  let weight = parseFloat(match[1].replace(',', '.'));
+  if (isNaN(weight)) return 0;
+
+  // Проверяем единицы измерения
+  if (str.includes('г') && !str.includes('кг')) {
+    // Граммы → конвертируем в кг
+    weight = weight / 1000;
+  }
+
+  return weight;
+}
+
+
+/**
+ * Парсинг габаритов из строки (значения в мм)
+ * Поддерживает форматы: "142x51x51", "142х51х51", "142*51*51"
+ * @returns {Object|null} { length, width, height } в мм
+ */
+function parseDimensionsMm(value) {
+  if (!value) return null;
+
+  const str = String(value).trim();
+
+  // Паттерн: три числа через разделитель (x, х, *, ×)
+  const match = str.match(/(\d+(?:[.,]\d+)?)\s*[xх×\*]\s*(\d+(?:[.,]\d+)?)\s*[xх×\*]\s*(\d+(?:[.,]\d+)?)/i);
+
+  if (match) {
+    return {
+      length: parseFloat(match[1].replace(',', '.')),  // Д - первое число
+      width: parseFloat(match[2].replace(',', '.')),   // Ш - второе число
+      height: parseFloat(match[3].replace(',', '.'))   // В - третье число
+    };
+  }
+
+  logWarning(`⚠️ Не удалось распарсить габариты: "${value}"`);
+  return null;
 }
 
 
@@ -4762,49 +4921,57 @@ function createImprovedAltTagHelperHTML(products) {
 // ========================================
 
 /**
- * Проверка существования товара по артикулу (SKU)
+ * Проверка существования товара по артикулу (SKU) через лист "Выгрузка"
+ *
+ * ОПТИМИЗАЦИЯ: Вместо API запросов к InSales (медленно, 1000+ товаров),
+ * проверяем наличие артикула в листе "Выгрузка" (колонка X - Артикул).
+ * Лист "Выгрузка" содержит актуальный каталог магазина.
  *
  * @param {string} sku - Артикул товара
- * @returns {Object|null} Товар, если найден, иначе null
+ * @returns {Object|null} Информация о товаре, если найден, иначе null
  */
 function checkProductExists(sku) {
   try {
-    logInfo(`🔍 Проверяем существование товара с артикулом: ${sku}`);
+    const normalizedSku = String(sku).trim();
+    logInfo(`🔍 Проверяем существование товара с артикулом: ${normalizedSku}`);
 
-    // ОПТИМИЗИРОВАННАЯ ВЕРСИЯ (исправлена бесконечная загрузка):
-    // ❌ СТАРАЯ ПРОБЛЕМА: загружала ВСЕ товары постранично + вызывала loadProductVariants для каждого
-    // ✅ НОВОЕ РЕШЕНИЕ: проверяем только первые 50 товаров, используя variants из основного ответа API
-    //
-    // InSales API включает variants в ответ /admin/products.json, поэтому
-    // нам НЕ нужны дополнительные запросы к /admin/products/{id}/variants.json
+    // Читаем артикулы из листа "Выгрузка" (колонка X = 24)
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const exportSheet = ss.getSheetByName(SHEET_NAMES.EXPORT);
 
-    const products = makeInsalesRequest(
-      'GET',
-      INSALES_ENDPOINTS.PRODUCTS,
-      null,
-      { per_page: 50, page: 1 }
-    );
+    if (!exportSheet) {
+      logWarning('⚠️ Лист "Выгрузка" не найден, пропускаем проверку дубликатов');
+      return null;
+    }
 
-    if (products && Array.isArray(products)) {
-      // Проверяем каждый товар и его варианты (variants уже в ответе API)
-      for (const product of products) {
-        if (product.variants && Array.isArray(product.variants)) {
-          for (const variant of product.variants) {
-            if (variant.sku && variant.sku.toString().trim() === sku.toString().trim()) {
-              logInfo(`✅ Товар найден: "${product.title}" (ID: ${product.id})`);
-              return {
-                ...product,
-                matchedVariant: variant
-              };
-            }
-          }
-        }
+    // Читаем колонки A (ID товара), B (Название) и X (Артикул)
+    const lastRow = exportSheet.getLastRow();
+    if (lastRow < 2) {
+      logInfo('ℹ️ Лист "Выгрузка" пуст');
+      return null;
+    }
+
+    // Читаем только нужные колонки для экономии памяти
+    const skuColumn = exportSheet.getRange(2, 24, lastRow - 1, 1).getValues(); // Колонка X (Артикул)
+    const idColumn = exportSheet.getRange(2, 1, lastRow - 1, 1).getValues();   // Колонка A (ID товара)
+    const nameColumn = exportSheet.getRange(2, 2, lastRow - 1, 1).getValues(); // Колонка B (Название)
+
+    // Ищем артикул
+    for (let i = 0; i < skuColumn.length; i++) {
+      const existingSku = String(skuColumn[i][0] || '').trim();
+      if (existingSku === normalizedSku) {
+        const productId = idColumn[i][0];
+        const productName = nameColumn[i][0];
+        logInfo(`✅ Товар найден в каталоге: "${productName}" (ID: ${productId})`);
+        return {
+          id: productId,
+          title: productName,
+          sku: existingSku
+        };
       }
     }
 
-    // Если не нашли в первых 50 товарах, считаем что товара нет
-    // Это защитит от длительного поиска по всей базе (может быть 1000+ товаров)
-    logInfo(`ℹ️ Товар с артикулом "${sku}" не найден в InSales`);
+    logInfo(`ℹ️ Товар с артикулом "${normalizedSku}" не найден в каталоге`);
     return null;
 
   } catch (error) {
@@ -4832,6 +4999,7 @@ function createInsalesProduct(productData) {
       price,
       quantity,
       properties,
+      specificationsNormalized,  // Для извлечения веса и габаритов
       isHidden = IMPORT_SETTINGS.CREATE_HIDDEN
     } = productData;
 
@@ -4846,6 +5014,13 @@ function createInsalesProduct(productData) {
 
     if (!price || price <= 0) {
       throw new Error('Отсутствует или некорректная цена товара');
+    }
+
+    // Проверка дубликата по артикулу через лист "Выгрузка"
+    const existingProduct = checkProductExists(sku);
+    if (existingProduct) {
+      logWarning(`⚠️ Товар с артикулом "${sku}" уже существует в каталоге: "${existingProduct.title}" (ID: ${existingProduct.id})`);
+      throw new Error(`Товар с артикулом "${sku}" уже существует в InSales (ID: ${existingProduct.id})`);
     }
 
     logInfo(`📦 Создаем товар в InSales: "${title}" (${sku})`);
@@ -4870,13 +5045,16 @@ function createInsalesProduct(productData) {
       payload.product['short-description'] = shortDescription;
     }
 
-    // Создаем вариант товара с SKU и ценой
+    // Создаем вариант товара с SKU, ценой, весом и габаритами
     // ВАЖНО: InSales API использует подчёркивания, а не дефисы!
-    payload.product['variants_attributes'] = [{
-      'sku': sku,
-      'price': parseFloat(price),
-      'quantity': quantity !== null && quantity !== undefined ? parseInt(quantity) : null
-    }];
+    // Вес и габариты извлекаются из specificationsNormalized через buildVariantAttributes
+    const variantData = buildVariantAttributes({
+      article: sku,
+      price: price,
+      stock: quantity,
+      specificationsNormalized: specificationsNormalized
+    });
+    payload.product['variants_attributes'] = [variantData];
 
     // Добавляем характеристики (properties)
     if (properties && Array.isArray(properties) && properties.length > 0) {

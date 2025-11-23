@@ -861,7 +861,8 @@ function parseVeberFullProduct(articleOrUrl) {
       specifications: extractVeberSpecifications(html),
       price: extractVeberPrice(html),
       stock: extractVeberStock(html),
-      brand: extractVeberBrand(html)
+      brand: extractVeberBrand(html),
+      warranty: extractVeberWarranty(html)  // 🆕 Гарантия (отдельное поле на Veber.ru)
     };
 
     logInfo(`✅ Спарсено: ${result.title}`);
@@ -988,6 +989,45 @@ function extractVeberBrand(html) {
   const match = html.match(/<span[^>]*itemprop="brand"[^>]*>(.*?)<\/span>/is) ||
                 html.match(/Бренд:[^<]*<[^>]*>([^<]+)</is);
   return match ? cleanHtml(match[1]).trim() : '';
+}
+
+/**
+ * 🆕 НОВАЯ ФУНКЦИЯ: Извлечение гарантии с Veber.ru
+ *
+ * Veber.ru отображает гарантию не в таблице характеристик,
+ * а как отдельный элемент на странице с классом "unlimited-warranty"
+ * или ссылкой на /unlimited-warranty/
+ *
+ * Примеры:
+ * - "бессрочная ГАРАНТИЯ" → "Бессрочная"
+ * - "Гарантия: 2 года" (в таблице) → "2 года"
+ *
+ * @param {string} html - HTML страницы товара
+ * @returns {string} Значение гарантии
+ */
+function extractVeberWarranty(html) {
+  // 1. Проверяем наличие бессрочной гарантии (отдельный элемент на странице)
+  // Ищем ссылку с href на unlimited-warranty или элемент с классом unlimited-warranty
+  if (html.match(/class="[^"]*unlimited-warranty[^"]*"|href="[^"]*unlimited-warranty[^"]*"/i)) {
+    // Проверяем текст "бессрочная гарантия"
+    if (html.match(/бессрочн[^\s<]*\s*(?:<[^>]*>)*\s*гарант/i)) {
+      return 'Бессрочная';
+    }
+  }
+
+  // 2. Ищем гарантию в таблице характеристик
+  const tableMatch = html.match(/<tr[^>]*>.*?<td[^>]*>.*?[Гг]арантия.*?<\/td>.*?<td[^>]*>(.*?)<\/td>.*?<\/tr>/is);
+  if (tableMatch) {
+    return cleanHtml(tableMatch[1]).trim();
+  }
+
+  // 3. Ищем паттерн "Гарантия: X лет/года"
+  const textMatch = html.match(/[Гг]арантия[:\s]+(\d+\s*(?:год|года|лет|мес|месяц)[а-я]*)/i);
+  if (textMatch) {
+    return textMatch[1].trim();
+  }
+
+  return '';
 }
 
 /**

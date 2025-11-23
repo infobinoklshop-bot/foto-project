@@ -1453,10 +1453,17 @@ function executeFullProductImport(articles, supplier) {
         }
 
         // ✅ Отладочное логирование
-        logInfo(`   📊 Спарсенные данные: Цена="${productData.price}", Остаток="${productData.stock}"`);
+        logInfo(`   📊 Спарсенные данные: Цена="${productData.price}", Остаток="${productData.stock}", Гарантия="${productData.warranty || 'нет'}"`);
 
         // 2. Нормализация характеристик
         const specsRaw = JSON.parse(productData.specifications || '{}');
+
+        // 🆕 Добавляем гарантию в характеристики (она парсится отдельно на Veber.ru)
+        if (productData.warranty) {
+          specsRaw['Гарантия'] = productData.warranty;
+          logInfo(`   ✅ Добавлена гарантия в характеристики: "${productData.warranty}"`);
+        }
+
         const normalized = normalizeSpecifications(specsRaw, supplier, article);  // ✅ ИСПРАВЛЕНИЕ: Передаем артикул для связи с ненормализованными значениями
 
         // 3. AI-рерайт описания
