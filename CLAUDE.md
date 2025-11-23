@@ -10,6 +10,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Runtime:** V8 | **Timezone:** Europe/Moscow
 
+## Google Sheets Access
+
+**Spreadsheet ID:** `1WbHHZmGErFJgxxIPBQ4My-gYJV6PBEqkP7TczzEGOac`
+
+| Лист | Sheet ID | Назначение |
+|------|----------|------------|
+| Обработка изображений | 0 | Основные данные товаров (A-AB) |
+| Справочник параметров | 549854820 | Маппинг характеристик |
+| Выгрузка | 408711254 | Экспорт в InSales |
+
 ## Quick Reference
 
 ### Команды разработки (clasp)
