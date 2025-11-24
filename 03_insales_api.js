@@ -4185,6 +4185,107 @@ function showCategorySelectionFromFound(foundCategories) {
 // ОТПРАВКА ОБРАБОТАННЫХ ИЗОБРАЖЕНИЙ В INSALES
 // ========================================
 
+// Кеш SKU -> Product ID для ускорения повторных поисков
+let _skuToProductIdCache = null;
+
+/**
+ * Построение кеша SKU -> Product ID
+ * Загружает все товары один раз и строит индекс
+ */
+function buildSkuCache() {
+  const context = "Построение кеша SKU";
+
+  if (_skuToProductIdCache !== null) {
+    logInfo(`📦 Используем существующий кеш (${Object.keys(_skuToProductIdCache).length} артикулов)`);
+    return _skuToProductIdCache;
+  }
+
+  logInfo(`🔄 Строим кеш SKU -> Product ID...`);
+  _skuToProductIdCache = {};
+
+  let page = 1;
+  const perPage = 250; // Максимум для InSales
+  let totalProducts = 0;
+
+  while (true) {
+    const products = makeInsalesRequest('GET', '/admin/products.json', null, {
+      per_page: perPage,
+      page: page
+    });
+
+    if (!products || products.length === 0) {
+      break;
+    }
+
+    for (const product of products) {
+      if (product.variants && product.variants.length > 0) {
+        for (const variant of product.variants) {
+          if (variant.sku) {
+            const sku = String(variant.sku).trim();
+            _skuToProductIdCache[sku] = product.id;
+          }
+        }
+      }
+    }
+
+    totalProducts += products.length;
+
+    if (products.length < perPage) {
+      break;
+    }
+
+    page++;
+    Utilities.sleep(200);
+  }
+
+  logInfo(`✅ Кеш построен: ${Object.keys(_skuToProductIdCache).length} артикулов из ${totalProducts} товаров`);
+  return _skuToProductIdCache;
+}
+
+/**
+ * Сброс кеша SKU (вызывать после создания новых товаров)
+ */
+function clearSkuCache() {
+  _skuToProductIdCache = null;
+  logInfo('🗑️ Кеш SKU очищен');
+}
+
+/**
+ * Поиск товара в InSales по артикулу (SKU)
+ * Использует кеш для быстрого поиска
+ * @param {string} article - Артикул товара
+ * @returns {number|null} - ID товара в InSales или null если не найден
+ */
+function findProductIdByArticle(article) {
+  const context = "Поиск товара по артикулу в InSales";
+
+  try {
+    if (!article) {
+      logWarning('⚠️ Артикул не указан для поиска');
+      return null;
+    }
+
+    const searchArticle = String(article).trim();
+    logInfo(`🔍 Ищем товар с артикулом: ${searchArticle}`);
+
+    // Используем кеш для быстрого поиска
+    const cache = buildSkuCache();
+
+    if (cache[searchArticle]) {
+      const productId = cache[searchArticle];
+      logInfo(`✅ Найден товар ID ${productId} с артикулом ${searchArticle} (из кеша)`);
+      return productId;
+    }
+
+    logInfo(`ℹ️ Товар с артикулом ${searchArticle} не найден в InSales`);
+    return null;
+
+  } catch (error) {
+    logError(`❌ Ошибка поиска товара по артикулу: ${article}`, error, context);
+    return null;
+  }
+}
+
 /**
  * Отправка выбранных товаров с обработанными изображениями в InSales
  * Читает данные из Google Sheets и обновляет карточки товаров
@@ -4241,7 +4342,7 @@ function sendProcessedImagesToInSales() {
       'Отправка в InSales',
       `Готово к отправке: ${readyToSend.length} товаров\n\n` +
       'ВНИМАНИЕ: Старые изображения будут заменены!\n' +
-      'Alt-теги добавляются вручную через помощника.\n\n' +
+      'Alt-теги загружаются автоматически вместе с изображениями.\n\n' +
       'Продолжить?',
       ui.ButtonSet.YES_NO
     );
@@ -4279,23 +4380,45 @@ function sendProcessedImagesToInSales() {
           imageUrls.push(...rawUrls);
         }
         
-        const altTags = item.altTags ? 
-          item.altTags.split(/[|,\n]/).map(alt => alt.trim()).filter(alt => alt) : 
+        // Alt-теги разделяются ТОЛЬКО переносом строки (не запятой - она часть текста!)
+        const altTags = item.altTags ?
+          item.altTags.split(/[\n]/).map(alt => alt.trim()).filter(alt => alt) :
           [];
         
         if (imageUrls.length === 0) {
           throw new Error('Нет валидных URL изображений');
         }
-        
-        logInfo(`📤 Товар: ${item.productName} (InSales ID: ${item.insalesId})`);
+
+        // Если InSales ID отсутствует - ищем товар по артикулу
+        let productId = item.insalesId;
+        if (!productId) {
+          logInfo(`⚠️ InSales ID пустой, ищем товар по артикулу: ${item.article}`);
+          SpreadsheetApp.getActiveSpreadsheet().toast(
+            `Поиск товара по артикулу ${item.article}...`,
+            '🔍 Поиск в InSales',
+            5
+          );
+
+          productId = findProductIdByArticle(item.article);
+
+          if (productId) {
+            // Сохраняем найденный ID в таблицу для будущих операций
+            sheet.getRange(item.rowIndex, IMAGES_COLUMNS.INSALES_ID).setValue(productId);
+            logInfo(`✅ Найден и сохранён InSales ID: ${productId}`);
+          } else {
+            throw new Error(`Товар с артикулом ${item.article} не найден в InSales. Сначала создайте товар.`);
+          }
+        }
+
+        logInfo(`📤 Товар: ${item.productName} (InSales ID: ${productId})`);
         logInfo(`📷 Изображений: ${imageUrls.length}, Alt-тегов: ${altTags.length}`);
-        
+
         // Отправляем в InSales (как в старом проекте)
-        const seoFilenames = item.seoFilenames ? 
-          item.seoFilenames.split(/[|,\n]/).map(name => name.trim()).filter(name => name) : 
+        const seoFilenames = item.seoFilenames ?
+          item.seoFilenames.split(/[|,\n]/).map(name => name.trim()).filter(name => name) :
           [];
 
-        const success = updateProductInInSalesWorking(item.insalesId, imageUrls, altTags, seoFilenames);
+        const success = updateProductInInSalesWorking(productId, imageUrls, altTags, seoFilenames);
         
         if (success) {
           sheet.getRange(item.rowIndex, IMAGES_COLUMNS.INSALES_STATUS)
@@ -4318,7 +4441,7 @@ function sendProcessedImagesToInSales() {
       }
     }
     
-    const resultMessage = `Отправка завершена!\n\n✅ Успешно: ${successCount}\n❌ Ошибок: ${errorCount}\n\n💡 Теперь добавьте alt-теги через помощника`;
+    const resultMessage = `Отправка завершена!\n\n✅ Успешно: ${successCount}\n❌ Ошибок: ${errorCount}\n\n📷 Alt-теги загружены вместе с изображениями`;
     SpreadsheetApp.getActiveSpreadsheet().toast(resultMessage, '🎉 Готово', 15);
     
     return { success: true, total: readyToSend.length, sent: successCount, errors: errorCount };
@@ -4391,13 +4514,29 @@ function updateProductInInSalesWorking(productId, imageUrls, altTags, seoFilenam
 
         logInfo(`📤 Добавляем прямую ссылку: ${url}`);
 
+        // title в InSales API используется как alt-тег на фронтенде
+        const altTag = altTags[index] || '';
+        // Очищаем имя файла: убираем расширение и точки (InSales добавит расширение сам)
+        let filename = seoFilenames[index] || `processed-image-${index + 1}`;
+        // Убираем расширение .webp/.jpg и т.д. если есть
+        filename = filename.replace(/\.(webp|jpg|jpeg|png|gif)$/i, '');
+        // Убираем точки в конце
+        filename = filename.replace(/\.+$/, '').trim();
+
+        // Явно добавляем расширение .webp чтобы InSales не добавлял своё
+        // (InSales может некорректно добавлять расширение, создавая двойную точку)
+        filename = filename + '.webp';
+
+        logInfo(`🔧 SEO filename после очистки: "${filename}"`);
+
         imagesToAdd.push({
           src: url,
-          filename: seoFilenames[index] || `processed-image-${index + 1}`,
+          filename: filename,
+          title: altTag,  // InSales использует title как alt-тег
           position: index + 1
         });
 
-        logInfo(`✅ Изображение ${index + 1} готово: ${seoFilenames[index] || 'processed-image-' + (index + 1)}`);
+        logInfo(`✅ Изображение ${index + 1} готово: ${filename}${altTag ? `, alt: "${altTag.substring(0, 30)}..."` : ''}`);
         
       } catch (imageError) {
         logError(`❌ Ошибка подготовки изображения ${index + 1}`, imageError, context);
@@ -4409,34 +4548,98 @@ function updateProductInInSalesWorking(productId, imageUrls, altTags, seoFilenam
       throw new Error('Не удалось подготовить ни одного изображения');
     }
     
-    // ЭТАП 4: Объединяем операции
-    const allImageOperations = [...imagesToDelete, ...imagesToAdd];
-    
-    const updateData = {
-      product: {
-        id: productId,
-        images_attributes: allImageOperations
+    // ЭТАП 4: Сначала удаляем старые изображения (отдельный запрос)
+    if (imagesToDelete.length > 0) {
+      logInfo(`🗑️ Удаляем ${imagesToDelete.length} старых изображений...`);
+
+      const deleteData = {
+        product: {
+          id: productId,
+          images_attributes: imagesToDelete
+        }
+      };
+
+      const deleteResponse = UrlFetchApp.fetch(`${credentials.baseUrl}/admin/products/${productId}.json`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Basic ' + authString,
+          'Content-Type': 'application/json'
+        },
+        payload: JSON.stringify(deleteData),
+        muteHttpExceptions: true
+      });
+
+      if (deleteResponse.getResponseCode() !== 200) {
+        logError(`⚠️ Ошибка удаления старых изображений: ${deleteResponse.getResponseCode()}`, null, context);
+        // Продолжаем добавлять новые, даже если удаление не сработало
+      } else {
+        logInfo(`✅ Старые изображения удалены`);
       }
-    };
-    
-    logInfo(`📤 Отправляем обновление: удалить ${imagesToDelete.length}, добавить ${imagesToAdd.length}`);
-    
-    // ЭТАП 5: Отправляем обновление
-    const updateResponse = UrlFetchApp.fetch(`${credentials.baseUrl}/admin/products/${productId}.json`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': 'Basic ' + authString,
-        'Content-Type': 'application/json'
-      },
-      payload: JSON.stringify(updateData)
-    });
-    
-    if (updateResponse.getResponseCode() === 200) {
-      logInfo(`✅ Товар ${productId} успешно обновлен: ${imagesToAdd.length} изображений загружено`);
+
+      Utilities.sleep(2000); // Пауза между запросами
+    }
+
+    // ЭТАП 5: Добавляем новые изображения порциями по 3 штуки
+    const BATCH_SIZE = 3;
+    let addedCount = 0;
+
+    for (let i = 0; i < imagesToAdd.length; i += BATCH_SIZE) {
+      const batch = imagesToAdd.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(imagesToAdd.length / BATCH_SIZE);
+
+      logInfo(`📤 Добавляем изображения: пакет ${batchNum}/${totalBatches} (${batch.length} шт.)`);
+
+      // Дебаг: логируем что отправляем
+      batch.forEach((img, idx) => {
+        logInfo(`   📎 [${idx}] filename: "${img.filename}"`);
+      });
+
+      const addData = {
+        product: {
+          id: productId,
+          images_attributes: batch
+        }
+      };
+
+      let addResponse;
+      try {
+        addResponse = UrlFetchApp.fetch(`${credentials.baseUrl}/admin/products/${productId}.json`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': 'Basic ' + authString,
+            'Content-Type': 'application/json'
+          },
+          payload: JSON.stringify(addData),
+          muteHttpExceptions: true
+        });
+      } catch (fetchError) {
+        logError(`❌ Ошибка HTTP запроса (пакет ${batchNum})`, fetchError, context);
+        continue; // Пробуем следующий пакет
+      }
+
+      const responseCode = addResponse.getResponseCode();
+
+      if (responseCode === 200) {
+        addedCount += batch.length;
+        logInfo(`✅ Пакет ${batchNum} загружен успешно`);
+      } else {
+        const responseText = addResponse.getContentText();
+        logError(`❌ Ошибка пакета ${batchNum}: HTTP ${responseCode}`, null, context);
+        logError(`Ответ InSales: ${responseText.substring(0, 300)}`, null, context);
+      }
+
+      // Пауза между пакетами (кроме последнего)
+      if (i + BATCH_SIZE < imagesToAdd.length) {
+        Utilities.sleep(3000);
+      }
+    }
+
+    if (addedCount > 0) {
+      logInfo(`✅ Товар ${productId} обновлен: ${addedCount}/${imagesToAdd.length} изображений загружено`);
       return true;
     } else {
-      logError(`❌ Ошибка обновления товара ${productId}: ${updateResponse.getResponseCode()}`, 
-               updateResponse.getContentText(), context);
+      logError(`❌ Не удалось загрузить ни одного изображения для товара ${productId}`, null, context);
       return false;
     }
     

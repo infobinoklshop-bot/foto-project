@@ -117,19 +117,26 @@ async function processSelectedImages() {
         
         // Устанавливаем статус "Обработка..."
         setProcessingStatusSimple(product.article, 'Обработка...');
-        
-        // Парсим URL изображений
-        const imageUrls = product.originalImages
-          .split(/[,\n]/)
-          .map(url => url.trim())
-          .filter(url => url && url.startsWith('http'))
-          .slice(0, 10); // Максимум 10 изображений
 
-        if (imageUrls.length === 0) {
+        // Парсим URL изображений из ВСЕХ источников
+        const parseUrls = (text) => {
+          if (!text) return [];
+          return text.split(/[,\n]/)
+            .map(url => url.trim())
+            .filter(url => url && url.startsWith('http'));
+        };
+
+        const allImageUrls = [
+          ...parseUrls(product.originalImages),
+          ...parseUrls(product.supplierImages),
+          ...parseUrls(product.additionalImages)
+        ].slice(0, 10); // Максимум 10 изображений
+
+        if (allImageUrls.length === 0) {
           throw new Error('Нет валидных URL изображений');
         }
 
-        const results = [];
+        logInfo(`Найдено ${allImageUrls.length} изображений из всех источников`);
 
         // Обрабатываем все изображения товара за один вызов
         logInfo(`Обрабатываем все изображения товара`);
@@ -179,18 +186,26 @@ async function processSelectedImages() {
 async function analyzeProductImage(imageUrl, productName, categoryInfo = '') {
   try {
     const systemPrompt = `Ты эксперт по анализу изображений товаров для интернет-магазина и SEO-оптимизации.
-    
+
     ТВОЯ РОЛЬ:
     - Анализируешь изображения товаров для e-commerce
     - Создаешь SEO-оптимизированные alt-теги для accessibility и поисковой оптимизации
-    - Генерируешь правильные имена файлов для веб-использования`;
-    
-    const userPrompt = `Проанализируй изображение товара "${productName}". 
+    - Генерируешь правильные имена файлов для веб-использования
+
+    КРИТИЧЕСКИ ВАЖНО:
+    - Название товара "${productName}" — это ФАКТ, не подлежащий изменению
+    - НИКОГДА не меняй тип товара (бинокль на монокуляр, телескоп на подзорную трубу и т.д.)
+    - В alt-теге и имени файла ВСЕГДА используй название товара как основу
+    - Описывай только визуальные детали (ракурс, комплектацию, особенности), сохраняя название`;
+
+    const userPrompt = `Товар: "${productName}" (это точное название, НЕ меняй его!)
     ${categoryInfo ? `Категория: ${categoryInfo}` : ''}
-    
-    Опиши что видишь и создай:
-    1. SEO-оптимизированный alt-тег (максимум 125 символов)
-    2. SEO-имя файла (только латиница, максимум 60 символов)`;
+
+    Проанализируй изображение и создай:
+    1. SEO-оптимизированный alt-тег (максимум 125 символов) — ОБЯЗАТЕЛЬНО начни с названия товара "${productName}", добавь описание ракурса/деталей
+    2. SEO-имя файла (только латиница, максимум 60 символов) — транслитерируй название товара + ракурс/особенность
+
+    ВАЖНО: На изображении именно "${productName}", даже если визуально похоже на другой прибор.`;
     
     const response = await callOpenAIVision(imageUrl, systemPrompt, userPrompt);
     return parseOpenAIResponse(response, 'image_analysis');
@@ -402,7 +417,7 @@ async function sendImageToAssistant(threadId, imageUrl, productName) {
     content: [
       {
         type: "text",
-        text: `Проанализируй изображение товара "${productName}". Опиши что видишь и создай SEO-оптимизированный alt-тег и имя файла.`
+        text: `Товар: "${productName}" (ТОЧНОЕ название, НЕ меняй!). Создай alt-тег и SEO-имя файла, ОБЯЗАТЕЛЬНО сохраняя название "${productName}" как основу. Описывай только ракурс/детали изображения.`
       },
       {
         type: "image_url",
@@ -693,18 +708,21 @@ function validateAltTag(altTag, productName) {
   if (!altTag) {
     return IMAGE_PROCESSING_CONFIG.FALLBACK_ALT_TAG.replace('{productName}', productName);
   }
-  
+
   // Убираем лишние пробелы
   altTag = altTag.trim().replace(/\s+/g, ' ');
-  
+
+  // Заменяем * на x в обозначениях кратности (7*40 → 7x40, 8*42 → 8x42)
+  altTag = altTag.replace(/(\d+)\s*\*\s*(\d+)/g, '$1x$2');
+
   // Ограничиваем длину
   if (altTag.length > IMAGE_PROCESSING_CONFIG.ALT_TAG_MAX_LENGTH) {
     altTag = altTag.substring(0, IMAGE_PROCESSING_CONFIG.ALT_TAG_MAX_LENGTH - 3) + '...';
   }
-  
+
   // Убираем слова "изображение", "фото", "картинка"
   altTag = altTag.replace(/\b(изображение|фото|картинка)\b/gi, '').trim();
-  
+
   return altTag;
 }
 
@@ -715,23 +733,30 @@ function validateSeoFilename(filename) {
  if (!filename) {
    return IMAGE_PROCESSING_CONFIG.FALLBACK_FILENAME.replace('{timestamp}', Date.now());
  }
-  // Убираем расширение если есть
- const parts = filename.split('.');
- let name = parts.length > 1 ? parts.slice(0, -1).join('.') : filename;
-  // Оставляем только латиницу, цифры и дефисы
+
+ // Убираем точки в конце (AI иногда добавляет лишние)
+ let name = filename.replace(/\.+$/, '');
+
+ // Убираем расширение если есть (.webp, .jpg, .png и т.д.)
+ name = name.replace(/\.(webp|jpg|jpeg|png|gif|bmp|svg)$/i, '');
+
+ // Оставляем только латиницу, цифры и дефисы
  name = name.toLowerCase()
    .replace(/[^a-z0-9-]/g, '-')
    .replace(/-+/g, '-')
    .replace(/^-+|-+$/g, '');
-  // Ограничиваем длину
+
+ // Ограничиваем длину
  if (name.length > IMAGE_PROCESSING_CONFIG.FILENAME_MAX_LENGTH) {
    name = name.substring(0, IMAGE_PROCESSING_CONFIG.FILENAME_MAX_LENGTH);
  }
-  // Если имя пустое после валидации
+
+ // Если имя пустое после валидации
  if (!name) {
    name = IMAGE_PROCESSING_CONFIG.FALLBACK_FILENAME.replace('{timestamp}', Date.now());
  }
-  return name; // Возвращаем ТОЛЬКО имя без расширения
+
+ return name; // Возвращаем ТОЛЬКО имя без расширения
 }
 
 /**
@@ -1153,7 +1178,12 @@ function updateResultsSimple(article, altTags, seoFilenames, processedUrls) {
         // Форматируем данные для отображения в столбик (каждое значение с новой строки)
         const formattedProcessedUrls = processedUrls ? processedUrls.replace(/\s*\|\s*/g, '\n') : '';
         const formattedAltTags = altTags ? altTags.replace(/\s*\|\s*/g, '\n') : '';
-        const formattedSeoFilenames = seoFilenames ? seoFilenames.replace(/\s*\|\s*/g, '\n') : '';
+        // Убираем точки в конце SEO-имен (AI иногда добавляет)
+        const formattedSeoFilenames = seoFilenames ? seoFilenames
+          .replace(/\s*\|\s*/g, '\n')
+          .split('\n')
+          .map(name => name.trim().replace(/\.+$/, ''))
+          .join('\n') : '';
         
         // Сохраняем в ячейки
         sheet.getRange(i + 1, IMAGES_COLUMNS.PROCESSED_IMAGES).setValue(formattedProcessedUrls); // H - колонка 8
@@ -1203,9 +1233,23 @@ async function analyzeImageSimple(product) {
     logInfo(`Этап 1: AI-анализ ${imagesToProcess.length} исходных изображений`);
     const analysisResults = await processOpenAIOriginals(imagesToProcess, productName);
     
-    // ЭТАП 2: Replicate улучшение с fallback (scale=2)
-    logInfo(`Этап 2: Replicate улучшение с fallback`);
-    const enhancedImages = await processReplicateWithFallback(imagesToProcess);
+    // ЭТАП 2: Replicate улучшение (ОПЦИОНАЛЬНО - можно пропустить)
+    let enhancedImages;
+    const settings = getApiSettings();
+
+    if (settings.replicateToken) {
+      logInfo(`Этап 2: Replicate улучшение с fallback`);
+      enhancedImages = await processReplicateWithFallback(imagesToProcess);
+
+      // Проверяем, все ли провалились
+      const allFailed = enhancedImages.every(img => !img.wasEnhanced);
+      if (allFailed) {
+        logWarning('Replicate: все изображения провалились. Используем исходные.');
+      }
+    } else {
+      logInfo(`Этап 2: Replicate ПРОПУЩЕН (токен не настроен)`);
+      enhancedImages = imagesToProcess.map(url => ({ original: url, processed: url, wasEnhanced: false }));
+    }
     
     // ЭТАП 3: Единая WebP оптимизация всех изображений
     logInfo(`Этап 3: WebP оптимизация всех изображений`);
@@ -1263,15 +1307,22 @@ async function processOpenAIOriginals(imageUrls, productName) {
         const messageContent = [
           {
             type: "text",
-            text: `Проанализируй ${batch.length} изображений товара "${productName}" и создай для каждого:
-1. SEO-оптимизированный alt-тег (до 125 символов)
-2. SEO-имя файла (только латиница, до 60 символов, БЕЗ расширения)
+            text: `ТОВАР: "${productName}" — это ТОЧНОЕ название, НЕ МЕНЯЙ ЕГО!
+
+Проанализируй ${batch.length} изображений и создай для каждого:
+1. SEO-оптимизированный alt-тег (до 125 символов) — ОБЯЗАТЕЛЬНО начинай с "${productName}", добавляй только описание ракурса/деталей
+2. SEO-имя файла (латиница, до 60 символов, БЕЗ расширения) — транслитерируй "${productName}" + ракурс
+
+КРИТИЧЕСКИ ВАЖНО:
+- НИКОГДА не меняй тип товара (бинокль НЕ монокуляр, телескоп НЕ труба)
+- Сохраняй "${productName}" как основу каждого alt-тега
+- Описывай только визуальные детали: ракурс, комплектацию, цвет
 
 Отвечай в JSON формате:
 {
   "results": [
-    {"altTag": "alt текст 1", "seoFilename": "filename-1"},
-    {"altTag": "alt текст 2", "seoFilename": "filename-2"}
+    {"altTag": "${productName} - ракурс/детали", "seoFilename": "transliterated-name-detail"},
+    {"altTag": "${productName} - другой ракурс", "seoFilename": "transliterated-name-detail2"}
   ]
 }`
           }
@@ -1345,11 +1396,95 @@ async function processOpenAIOriginals(imageUrls, productName) {
 }
 
 /**
- * ЭТАП 2: Replicate улучшение с fallback (настраиваемый scale)
+ * Определение размеров изображения в пикселях по заголовкам JPEG/PNG
+ * Скачивает только первые 64KB для анализа (быстро и экономно)
+ */
+async function getImageDimensions(imageUrl) {
+  try {
+    // Скачиваем изображение (частичная загрузка не поддерживается всеми серверами)
+    const response = UrlFetchApp.fetch(imageUrl, {
+      muteHttpExceptions: true,
+      // Некоторые CDN не поддерживают Range, поэтому скачиваем полностью
+      // но анализируем только первые байты
+    });
+
+    if (response.getResponseCode() !== 200) {
+      return null;
+    }
+
+    const bytes = response.getBlob().getBytes();
+
+    // Проверяем минимальный размер
+    if (bytes.length < 24) {
+      return null;
+    }
+
+    // PNG: magic bytes 89 50 4E 47 0D 0A 1A 0A
+    if (bytes[0] === -119 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+      // PNG IHDR chunk: width в байтах 16-19, height в байтах 20-23 (big-endian)
+      const width = ((bytes[16] & 0xFF) << 24) | ((bytes[17] & 0xFF) << 16) | ((bytes[18] & 0xFF) << 8) | (bytes[19] & 0xFF);
+      const height = ((bytes[20] & 0xFF) << 24) | ((bytes[21] & 0xFF) << 16) | ((bytes[22] & 0xFF) << 8) | (bytes[23] & 0xFF);
+      return { width, height, format: 'PNG' };
+    }
+
+    // JPEG: magic bytes FF D8 FF
+    if (bytes[0] === -1 && bytes[1] === -40 && bytes[2] === -1) {
+      // Ищем SOF0 (0xFFC0) или SOF2 (0xFFC2) маркер
+      let offset = 2;
+      while (offset < bytes.length - 9) {
+        if (bytes[offset] === -1) { // 0xFF
+          const marker = bytes[offset + 1] & 0xFF;
+
+          // SOF0 (0xC0), SOF1 (0xC1), SOF2 (0xC2) - содержат размеры
+          if (marker >= 0xC0 && marker <= 0xC3) {
+            // Height в байтах offset+5,6, Width в offset+7,8 (big-endian)
+            const height = ((bytes[offset + 5] & 0xFF) << 8) | (bytes[offset + 6] & 0xFF);
+            const width = ((bytes[offset + 7] & 0xFF) << 8) | (bytes[offset + 8] & 0xFF);
+            return { width, height, format: 'JPEG' };
+          }
+
+          // Пропускаем другие сегменты
+          if (marker !== 0x00 && marker !== 0xFF && marker !== 0xD0 && marker !== 0xD8 && marker !== 0xD9) {
+            const segmentLength = ((bytes[offset + 2] & 0xFF) << 8) | (bytes[offset + 3] & 0xFF);
+            offset += 2 + segmentLength;
+          } else {
+            offset += 2;
+          }
+        } else {
+          offset++;
+        }
+
+        // Ограничение поиска первыми 64KB
+        if (offset > 65536) break;
+      }
+    }
+
+    // WebP: RIFF....WEBP
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+      // VP8 chunk для lossy WebP
+      if (bytes[12] === 0x56 && bytes[13] === 0x50 && bytes[14] === 0x38 && bytes[15] === 0x20) {
+        // VP8: размеры в байтах 26-29
+        const width = ((bytes[27] & 0xFF) << 8) | (bytes[26] & 0xFF);
+        const height = ((bytes[29] & 0xFF) << 8) | (bytes[28] & 0xFF);
+        return { width: width & 0x3FFF, height: height & 0x3FFF, format: 'WebP' };
+      }
+    }
+
+    return null; // Неизвестный формат
+
+  } catch (error) {
+    logWarning(`Ошибка определения размеров: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * ЭТАП 2: Replicate улучшение с проверкой размера (только для маленьких изображений)
  */
 async function processReplicateWithFallback(imageUrls) {
   const settings = getApiSettings();
-  
+
   if (!settings.replicateToken) {
     logWarning('Replicate Token недоступен, используем исходные изображения');
     return imageUrls.map(url => ({ original: url, processed: url, wasEnhanced: false }));
@@ -1358,14 +1493,40 @@ async function processReplicateWithFallback(imageUrls) {
   // Определяем модель
   const modelKey = settings.replicateModel || 'esrgan';
   const modelConfig = getReplicateModelConfig(modelKey);
-  
-  logInfo(`Запускаем Replicate (${modelConfig.name}, scale=${settings.replicateScale}) для ${imageUrls.length} изображений с fallback`);
 
-  // Параллельная обработка с Promise.allSettled
-  const replicatePromises = imageUrls.map(async (imageUrl, index) => {
+  // ЛИМИТ: изображения >= 1500px уже качественные, Replicate не нужен
+  const MIN_DIMENSION_FOR_SKIP = 1500;
+
+  logInfo(`Replicate (${modelConfig.name}): анализируем ${imageUrls.length} изображений`);
+
+  // Последовательная обработка с проверкой размера
+  const results = [];
+
+  for (let index = 0; index < imageUrls.length; index++) {
+    const imageUrl = imageUrls[index];
+
     try {
+      // ПРОВЕРКА РАЗМЕРА ИЗОБРАЖЕНИЯ В ПИКСЕЛЯХ
+      const dimensions = await getImageDimensions(imageUrl);
+
+      if (dimensions && dimensions.width && dimensions.height) {
+        const maxSide = Math.max(dimensions.width, dimensions.height);
+
+        // Пропускаем большие изображения — они уже качественные
+        if (maxSide >= MIN_DIMENSION_FOR_SKIP) {
+          logInfo(`Изображение ${index + 1}: ${dimensions.width}×${dimensions.height}px — качественное, Replicate не требуется`);
+          results.push({ original: imageUrl, processed: imageUrl, wasEnhanced: false, skippedReason: 'already_high_quality' });
+          continue;
+        }
+
+        logInfo(`Изображение ${index + 1}: ${dimensions.width}×${dimensions.height}px — маленькое, улучшаем`);
+      } else {
+        logWarning(`Изображение ${index + 1}: не удалось определить размер, пробуем Replicate`);
+      }
+
+      // Отправляем в Replicate только маленькие изображения
       logInfo(`Запускаем Replicate для изображения ${index + 1}`);
-      
+
       const predictionResponse = UrlFetchApp.fetch('https://api.replicate.com/v1/predictions', {
         method: 'POST',
         headers: {
@@ -1382,36 +1543,46 @@ async function processReplicateWithFallback(imageUrls) {
         muteHttpExceptions: true
       });
 
-      if (predictionResponse.getResponseCode() !== 201) {
-        throw new Error(`Replicate failed: ${predictionResponse.getResponseCode()}`);
+      const responseCode = predictionResponse.getResponseCode();
+      const responseText = predictionResponse.getContentText();
+
+      if (responseCode !== 201) {
+        // Детальная диагностика ошибки
+        let errorDetails = `HTTP ${responseCode}`;
+        try {
+          const errorData = JSON.parse(responseText);
+          errorDetails += `: ${errorData.detail || errorData.error || responseText.substring(0, 100)}`;
+        } catch (e) {
+          errorDetails += `: ${responseText.substring(0, 100)}`;
+        }
+        throw new Error(`Replicate prediction failed: ${errorDetails}`);
       }
 
-      const prediction = JSON.parse(predictionResponse.getContentText());
-      
-      // Ждем результат
-      const result = await waitForReplicateResult(prediction.id, settings.replicateToken, 120); // Увеличен таймаут
-      
+      const prediction = JSON.parse(responseText);
+
+      // Ждем результат (сокращен таймаут до 30 сек для ускорения)
+      const result = await waitForReplicateResult(prediction.id, settings.replicateToken, 30);
+
       if (result.success) {
         logInfo(`Изображение ${index + 1} улучшено через Replicate (${modelConfig.name})`);
-        return { original: imageUrl, processed: result.outputUrl, wasEnhanced: true };
+        results.push({ original: imageUrl, processed: result.outputUrl, wasEnhanced: true });
       } else {
-        throw new Error('Replicate processing failed');
+        throw new Error(`Replicate processing failed: ${result.reason || 'unknown'}`);
       }
-      
+
     } catch (error) {
       logWarning(`Replicate не удался для изображения ${index + 1}, используем исходное: ${error.message}`);
-      return { original: imageUrl, processed: imageUrl, wasEnhanced: false, error: error.message };
+      results.push({ original: imageUrl, processed: imageUrl, wasEnhanced: false, error: error.message });
     }
-  });
+  }
 
-  // Ждем все результаты (включая ошибки)
-  const results = await Promise.all(replicatePromises);
-  
+  // Статистика
   const enhancedCount = results.filter(r => r.wasEnhanced).length;
-  const failedCount = results.filter(r => !r.wasEnhanced).length;
-  
-  logInfo(`Replicate этап завершен: ${enhancedCount}/${results.length} улучшено, ${failedCount} использовали исходные`);
-  
+  const skippedHighQuality = results.filter(r => r.skippedReason === 'already_high_quality').length;
+  const failedCount = results.filter(r => !r.wasEnhanced && !r.skippedReason).length;
+
+  logInfo(`Replicate этап завершен: ${enhancedCount} улучшено, ${skippedHighQuality} пропущено (качественные), ${failedCount} ошибок`);
+
   return results;
 }
 
@@ -1476,64 +1647,98 @@ async function processUnifiedWebPOptimization(enhancedImages, analysisResults) {
     });
   }
 
-  logInfo(`Единая WebP оптимизация для ${enhancedImages.length} изображений (3000px)`);
-  
-  // Параллельная WebP обработка
-  const optimizationPromises = enhancedImages.map(async (img, index) => {
-    try {
-      const analysis = analysisResults[index] || {
-        altTag: `Изображение ${index + 1}`,
-        seoFilename: `image-${index + 1}`
-      };
+  // Увеличенный лимит: 15 изображений (~8 сек/шт = 2 мин)
+  // Основная защита — таймаут MAX_TOTAL_TIME_MS ниже
+  const MAX_WEBP_IMAGES = 15;
+  const imagesToOptimize = enhancedImages.slice(0, MAX_WEBP_IMAGES);
+  const skippedImages = enhancedImages.slice(MAX_WEBP_IMAGES);
 
-      // Единая WebP обработка для всех изображений
+  if (skippedImages.length > 0) {
+    logWarning(`WebP: обрабатываем первые ${MAX_WEBP_IMAGES}, остальные ${skippedImages.length} получат только alt-теги`);
+  }
+
+  logInfo(`WebP оптимизация: ${imagesToOptimize.length} изображений`);
+
+  const results = [];
+  const startTime = Date.now();
+  const MAX_TOTAL_TIME_MS = 240000; // 4 минуты максимум на весь этап (увеличено с 3)
+
+  // ПОСЛЕДОВАТЕЛЬНАЯ обработка (вместо параллельной) для стабильности
+  for (let index = 0; index < imagesToOptimize.length; index++) {
+    // Проверка таймаута
+    if (Date.now() - startTime > MAX_TOTAL_TIME_MS) {
+      logWarning(`WebP таймаут после ${index} изображений. Остальные пропущены.`);
+      // Добавляем оставшиеся как необработанные
+      for (let j = index; j < imagesToOptimize.length; j++) {
+        const analysis = analysisResults[j] || { altTag: `Изображение ${j + 1}`, seoFilename: `image-${j + 1}` };
+        results.push({
+          altTag: analysis.altTag,
+          seoFilename: analysis.seoFilename,
+          processedImageUrl: imagesToOptimize[j].processed,
+          confidence: imagesToOptimize[j].wasEnhanced ? 6 : 4
+        });
+      }
+      break;
+    }
+
+    const img = imagesToOptimize[index];
+    const analysis = analysisResults[index] || { altTag: `Изображение ${index + 1}`, seoFilename: `image-${index + 1}` };
+
+    try {
+      logInfo(`WebP ${index + 1}/${imagesToOptimize.length}: обработка...`);
+
       const webpResult = await unifiedWebPConversion(img.processed, settings.tinypngKey);
-      
+
       if (webpResult.success) {
-        // Загружаем на ImgBB
         const finalUrl = await uploadToImgBB(webpResult.blob, settings.imgbbKey, analysis.seoFilename);
-        
+
         if (finalUrl) {
-          logInfo(`Изображение ${index + 1} оптимизировано: ${webpResult.sizeKB}KB`);
-          return {
+          logInfo(`WebP ${index + 1}: OK (${webpResult.sizeKB}KB)`);
+          results.push({
             altTag: analysis.altTag,
             seoFilename: analysis.seoFilename,
             processedImageUrl: finalUrl,
             confidence: 8
-          };
+          });
+          continue;
         }
       }
 
-      // Fallback - используем обработанное изображение без WebP
-      return {
+      // Fallback
+      results.push({
         altTag: analysis.altTag,
         seoFilename: analysis.seoFilename,
         processedImageUrl: img.processed,
         confidence: img.wasEnhanced ? 6 : 4
-      };
-      
-    } catch (error) {
-      logError(`Ошибка оптимизации изображения ${index + 1}`, error);
-      
-      const analysis = analysisResults[index] || {
-        altTag: `Изображение ${index + 1}`,
-        seoFilename: `image-${index + 1}`
-      };
+      });
 
-      return {
+    } catch (error) {
+      logError(`WebP ${index + 1}: ошибка`, error);
+      results.push({
         altTag: analysis.altTag,
         seoFilename: analysis.seoFilename,
         processedImageUrl: img.processed,
         confidence: 3
-      };
+      });
     }
-  });
+  }
 
-  const results = await Promise.all(optimizationPromises);
-  
+  // Добавляем пропущенные изображения (без WebP оптимизации)
+  for (let i = 0; i < skippedImages.length; i++) {
+    const idx = MAX_WEBP_IMAGES + i;
+    const analysis = analysisResults[idx] || { altTag: `Изображение ${idx + 1}`, seoFilename: `image-${idx + 1}` };
+    results.push({
+      altTag: analysis.altTag,
+      seoFilename: analysis.seoFilename,
+      processedImageUrl: skippedImages[i].processed,
+      confidence: skippedImages[i].wasEnhanced ? 5 : 3
+    });
+  }
+
   const optimizedCount = results.filter(r => r.confidence >= 7).length;
-  logInfo(`WebP оптимизация завершена: ${optimizedCount}/${results.length} успешно оптимизированы`);
-  
+  const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+  logInfo(`WebP завершено за ${elapsedSec}с: ${optimizedCount}/${results.length} оптимизировано`);
+
   return results;
 }
 
@@ -2143,6 +2348,11 @@ async function waitForReplicateResult(predictionId, token, maxWaitSeconds) {
         muteHttpExceptions: true
       });
 
+      const responseCode = statusResponse.getResponseCode();
+      if (responseCode !== 200) {
+        return { success: false, reason: `status_check_failed_${responseCode}` };
+      }
+
       const statusData = JSON.parse(statusResponse.getContentText());
 
       if (statusData.status === 'succeeded' && statusData.output) {
@@ -2150,19 +2360,26 @@ async function waitForReplicateResult(predictionId, token, maxWaitSeconds) {
       }
 
       if (statusData.status === 'failed') {
-        return { success: false, reason: 'replicate_failed' };
+        // Детальная причина провала
+        const errorMsg = statusData.error || statusData.logs || 'unknown_error';
+        logWarning(`Replicate prediction failed: ${errorMsg}`);
+        return { success: false, reason: `replicate_failed: ${errorMsg.substring(0, 100)}` };
       }
 
-      // Ждем 1 секунду
-      Utilities.sleep(1000);
-      attempts++;
+      if (statusData.status === 'canceled') {
+        return { success: false, reason: 'canceled' };
+      }
+
+      // Ждем 2 секунды (вместо 1) чтобы уменьшить количество запросов
+      Utilities.sleep(2000);
+      attempts += 2;
 
     } catch (error) {
       return { success: false, reason: error.message };
     }
   }
 
-  return { success: false, reason: 'timeout' };
+  return { success: false, reason: `timeout_after_${maxWaitSeconds}s` };
 }
 
 /**

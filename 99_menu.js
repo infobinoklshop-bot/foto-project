@@ -59,6 +59,8 @@ function onOpen() {
      .addItem('📖 Управление справочником параметров', 'showSpecificationReferenceMenu')
      .addItem('🔄 Управление параметрами', 'showUnifiedParameterDialog')
      .addSeparator()
+     .addItem('🧪 Диагностика системы', 'quickDiagnostics')
+     .addItem('🧪 Тест API подключений', 'testApiConnections')
      .addItem('🆘 Справка', 'showHelpDialog')
      .addToUi();
   
@@ -121,18 +123,23 @@ function updateProductsFromInSales() {
 }
 
 /**
- * ОБРАБОТКА ИЗОБРАЖЕНИЙ AI (ЗАГЛУШКА ДЛЯ ЭТАПА 3)
- * 
- * Пока что показывает информационное сообщение
- * Будет заменена на реальную функцию в Этапе 3
+ * ОБРАБОТКА ИЗОБРАЖЕНИЙ AI
+ *
+ * Запускает полный пайплайн обработки изображений:
+ * 1. OpenAI анализ (alt-теги + SEO-имена)
+ * 2. Replicate улучшение (опционально)
+ * 3. TinyPNG оптимизация + ImgBB загрузка
+ *
+ * Реальная функция processSelectedImages() находится в 04_image_processing.js
+ * Эта функция-обёртка добавляет подтверждение перед запуском
  */
-function processSelectedImages() {
+function processImagesWithAIConfirm() {
   try {
     const ui = SpreadsheetApp.getUi();
-    
+
     // Проверяем наличие выбранных товаров
     const selectedCount = getSelectedProductsCount();
-    
+
     if (selectedCount === 0) {
       ui.alert(
         'Нет выбранных товаров',
@@ -141,28 +148,24 @@ function processSelectedImages() {
       );
       return;
     }
-    
-    // Показываем информацию о будущей функции
+
+    // Подтверждение запуска
     const response = ui.alert(
       'AI-обработка изображений',
       `Готово к обработке: ${selectedCount} товаров\n\n` +
-      '🚧 Функция будет доступна в Этапе 3\n' +
       '• Анализ изображений через OpenAI\n' +
       '• Генерация alt-тегов\n' +
-      '• Создание SEO-имен файлов\n\n' +
-      'Продолжить разработку Этапа 3?',
+      '• Создание SEO-имен файлов\n' +
+      '• Оптимизация и загрузка (если настроено)\n\n' +
+      'Запустить обработку?',
       ui.ButtonSet.YES_NO
     );
-    
+
     if (response === ui.Button.YES) {
-      ui.alert(
-        'Этап 3 в разработке',
-        'Модуль AI-обработки изображений будет готов в ближайшее время!\n\n' +
-        'Следите за обновлениями проекта.',
-        ui.ButtonSet.OK
-      );
+      // Вызываем реальную функцию обработки из 04_image_processing.js
+      processSelectedImages();
     }
-    
+
   } catch (error) {
     showErrorDialog('Ошибка обработки изображений', error.message);
   }
